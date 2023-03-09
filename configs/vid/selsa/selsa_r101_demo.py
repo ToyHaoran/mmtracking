@@ -1,11 +1,17 @@
 _base_ = [
     '../../_base_/models/faster-rcnn_r50-dc5.py',
-    '../../_base_/datasets/imagenet_vid_fgfa_style.py',
+    # 这里修改为demo数据集，而不是使用VID和DET的混合数据集
+    '../../_base_/datasets/imagenet_vid_demo.py',
     '../../_base_/default_runtime.py'
 ]
 model = dict(
     type='SELSA',
     detector=dict(
+        # r50和r101的主要区别
+        backbone=dict(
+                    depth=101,
+                    init_cfg=dict(
+                        type='Pretrained', checkpoint='torchvision://resnet101')),
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
             bbox_head=dict(
@@ -33,7 +39,7 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=7, val_interval=3)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=7, val_interval=7)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 

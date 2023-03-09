@@ -109,9 +109,9 @@ def main():
     else:
         # build customized runner from the registry
         # if 'runner_type' is set in the cfg
-        runner = RUNNERS.build(cfg)
+        runner = RUNNERS.build(cfg)  # Runner初始化，构建各种模型
 
-    # start training
+    # 开始训练
     runner.train()
 
 

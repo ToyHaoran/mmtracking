@@ -56,7 +56,7 @@ class SELSA(BaseVideoDetector):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        img = inputs['img']
+        img = inputs['img']  # 关键帧 Tensor:(1,1,3,608,800)
         assert img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
         assert img.size(0) == 1, \
             'SELSA video detectors only support 1 batch size per gpu for now.'
@@ -64,7 +64,7 @@ class SELSA(BaseVideoDetector):
             'SELSA video detector only has 1 key image per batch.'
         img = img[0]
 
-        ref_img = inputs['ref_img']
+        ref_img = inputs['ref_img']  # 参考帧 Tensor:(1,2,3,608,800)
         assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
         assert ref_img.size(0) == 1, \
             'SELSA video detectors only support 1 batch size per gpu for now.'
@@ -73,7 +73,7 @@ class SELSA(BaseVideoDetector):
         assert len(data_samples) == 1, \
             'SELSA video detectors only support 1 batch size per gpu for now.'
 
-        all_imgs = torch.cat((img, ref_img), dim=0)
+        all_imgs = torch.cat((img, ref_img), dim=0)  # 把关键帧和参考帧 0维连接 Tensor:(3,3,608,800)
         all_x = self.detector.extract_feat(all_imgs)
         x = []
         ref_x = []

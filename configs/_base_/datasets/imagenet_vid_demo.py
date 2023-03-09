@@ -29,7 +29,7 @@ test_pipeline = [
 # dataloader
 train_dataloader = dict(
     batch_size=1,
-    num_workers=1,
+    num_workers=2,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
     batch_sampler=dict(type='mmdet.AspectRatioBatchSampler'),
@@ -48,7 +48,7 @@ train_dataloader = dict(
             method='bilateral_uniform')))
 val_dataloader = dict(
     batch_size=1,
-    num_workers=1,
+    num_workers=2,
     persistent_workers=True,
     drop_last=False,
     sampler=dict(type='VideoSampler'),
