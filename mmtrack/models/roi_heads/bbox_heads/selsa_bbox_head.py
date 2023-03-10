@@ -64,6 +64,8 @@ class SelsaBBoxHead(ConvFCBBoxHead):
             for i, fc in enumerate(self.shared_fcs):
                 x = fc(x)
                 ref_x = fc(ref_x)
+                # 调用mmtrack.models.aggregators.selsa_aggregator.SelsaAggregator.forward()
+                # 将关键帧和参考帧的特征进行聚合
                 x = x + self.aggregator[i](x, ref_x)
                 ref_x = self.inplace_false_relu(ref_x)
                 x = self.inplace_false_relu(x)

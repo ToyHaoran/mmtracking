@@ -34,6 +34,12 @@ class SelsaAggregator(BaseModule):
         self.fc = nn.Linear(in_channels, in_channels)
         self.ref_fc = nn.Linear(in_channels, in_channels)
         self.num_attention_blocks = num_attention_blocks
+        # SelsaAggregator(
+        #     (fc_embed): Linear(in_features=1024, out_features=1024, bias=True)
+        #     (ref_fc_embed): Linear(in_features=1024, out_features=1024, bias=True)
+        #     (fc): Linear(in_features=1024, out_features=1024, bias=True)
+        #     (ref_fc): Linear(in_features=1024, out_features=1024, bias=True)
+        # )
 
     def forward(self, x: Tensor, ref_x: Tensor) -> Tensor:
         """Aggregate the features `ref_x` of reference proposals.
@@ -53,8 +59,9 @@ class SelsaAggregator(BaseModule):
             Tensor: The aggregated features of key frame proposals with shape
             [N, C].
         """
-        roi_n, C = x.shape
-        ref_roi_n, _ = ref_x.shape
+        # 直接在这里打断点，就可以看到最深层的调用关系。
+        roi_n, C = x.shape  # 176*1024
+        ref_roi_n, _ = ref_x.shape  # 373*1024
         num_c_per_att_block = C // self.num_attention_blocks
 
         x_embed = self.fc_embed(x)

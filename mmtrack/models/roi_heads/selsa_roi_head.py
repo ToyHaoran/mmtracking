@@ -96,6 +96,7 @@ class SelsaRoIHead(StandardRoIHead):
         """
 
         # TODO: a more flexible way to decide which feature maps to use
+        # 调用mmdet.models.roi_heads.roi_extractors.single_level_roi_extractor.SingleRoIExtractor.forward()
         bbox_feats = self.bbox_roi_extractor(
             x[:self.bbox_roi_extractor.num_inputs],
             rois,
@@ -106,6 +107,9 @@ class SelsaRoIHead(StandardRoIHead):
         if self.with_shared_head:
             bbox_feats = self.shared_head(bbox_feats)
             ref_bbox_feats = self.shared_head(ref_bbox_feats)
+
+        # 调用mmtrack.models.roi_heads.bbox_heads.selsa_bbox_head.SelsaBBoxHead.forward()
+        # 对于关键帧和参考帧的bbox特征进行聚合，内部调用SelsaAggregator
         cls_score, bbox_pred = self.bbox_head(bbox_feats, ref_bbox_feats)
 
         bbox_results = dict(

@@ -381,6 +381,19 @@ class BaseVideoDataset(BaseDataset):
             final_data_info = data_info.copy()
             final_data_info['is_video_data'] = self.load_as_video
 
+        """findal_data_info的信息
+        三张图片路径(未加载) {'file_name': ['xxx/000249.JPEG',xxx\\000244.JPEG', 'xxx\\000252.JPEG'],
+        第一帧是关键帧(训练帧)，后两帧是参考帧 'is_vid_train_frame': [True, False, False],
+        'img_id': [250, 245, 253], 'video_length': [300, 300, 300],...,
+        'img_path': ['xxx,xxx,xxx]
+        'instances': [
+        [{'ignore_flag': 0, 'bbox': [234, 206, 1068, 394], 'bbox_label': 16, 'instance_id': 1}], 
+        [{'ignore_flag': 0, 'bbox': [234, 206, 1070, 387], 'bbox_label': 16, 'instance_id': 1}], 
+        [{'ignore_flag': 0, 'bbox': [234, 206, 1070, 394], 'bbox_label': 16, 'instance_id': 1}]], 
+        'sample_idx': [12, 12, 12], 'is_video_data': [True, True, True]}
+        
+        在mmcv.transforms.wrappers.TransformBroadcaster.transform中将三张图片加载并进行一系列转换。
+        """
         return self.pipeline(final_data_info)
 
     def ref_img_sampling(self,
