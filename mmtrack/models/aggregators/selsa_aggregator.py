@@ -43,6 +43,7 @@ class SelsaAggregator(BaseModule):
 
     def forward(self, x: Tensor, ref_x: Tensor) -> Tensor:
         """Aggregate the features `ref_x` of reference proposals.
+        将参考提议 ref_x 的特征进行加权求和，得到聚合后的特征表示 x_new。
 
         The aggregation mainly contains two steps:
         1. Use multi-head attention to computing the weight between `x` and
@@ -74,9 +75,11 @@ class SelsaAggregator(BaseModule):
         ref_x_embed = ref_x_embed.view(ref_roi_n, self.num_attention_blocks,
                                        num_c_per_att_block).permute(1, 2, 0)
 
-        # [num_attention_blocks, roi_n, ref_roi_n]
+        # 计算输入张量 x_embed 和参考张量 ref_x_embed 之间的自注意力矩阵/余弦相似度矩阵,类似QK/V
+        # bmm表示批量矩阵乘法(Tensor(16,187,64)*(16,64,374)=(16,187,374))，表示16个注意力块，187个roi，374个参考帧roi
+        # 除法是为了进行缩放，以确保点积的结果不会因为向量维度较大而过大。这是在实现自注意力机制时常用的技巧。
         weights = torch.bmm(x_embed, ref_x_embed) / (x_embed.shape[-1]**0.5)
-        weights = weights.softmax(dim=2)
+        weights = weights.softmax(dim=2)  # 得到一个形状与weights相同的概率分布张量。
 
         ref_x_new = self.ref_fc(ref_x)
         # [num_attention_blocks, ref_roi_n, C / num_attention_blocks]
@@ -84,7 +87,8 @@ class SelsaAggregator(BaseModule):
                                    num_c_per_att_block).permute(1, 0, 2)
 
         # [roi_n, num_attention_blocks, C / num_attention_blocks]
+        # 用于将注意力权重 weights 和参考特征 ref_x_new 进行加权求和，得到聚合后的特征表示 x_new。
+        # 使用 contiguous() 函数将张量变为连续的内存块，以便后续的全连接层操作。
         x_new = torch.bmm(weights, ref_x_new).permute(1, 0, 2).contiguous()
-        # [roi_n, C]
-        x_new = self.fc(x_new.view(roi_n, C))
+        x_new = self.fc(x_new.view(roi_n, C))  # (187,1024)
         return x_new

@@ -80,9 +80,14 @@ class EmbedAggregator(BaseModule):
         ref_x_embed = ref_x
         for embed_conv in self.embed_convs:
             ref_x_embed = embed_conv(ref_x_embed)
+        # 对 ref_x_embed 张量进行特征归一化。目的是将该张量中的每个元素缩放到一个相同的范围内，使得它们的相对大小不会对余弦相似度的计算产生影响。
+        # norm() 计算 ref_x_embed 张量在第1维（即通道维）上的L2范数，并将其作为分母进行了归一化处理。
         ref_x_embed = ref_x_embed / ref_x_embed.norm(p=2, dim=1, keepdim=True)
 
+        # 计算 ref_x_embed 和 x_embed [1, C, H, W] 之间的余弦相似度。
+        # 逐元素相乘，然后在第1维（即通道维C）上求和 sum()，得到一个形状为 [1, H, W] 的张量 ada_weights，表示余弦相似度。
         ada_weights = torch.sum(ref_x_embed * x_embed, dim=1, keepdim=True)
-        ada_weights = ada_weights.softmax(dim=0)
+        ada_weights = ada_weights.softmax(dim=0)  # 张量归一化
+        # 加权求和，得到聚合后的特征图
         agg_x = torch.sum(ref_x * ada_weights, dim=0, keepdim=True)
         return agg_x

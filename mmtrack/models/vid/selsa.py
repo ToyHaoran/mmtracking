@@ -75,7 +75,7 @@ class SELSA(BaseVideoDetector):
 
         all_imgs = torch.cat((img, ref_img), dim=0)  # 把关键帧和参考帧 0维连接 Tensor:(3,3,608,800)、
         # 提取特征(进入mmdet)，detector是FasterRCNN，经过backbone(ResNet)，经过neck(ChannelMapper)，得到特征。
-        all_x = self.detector.extract_feat(all_imgs)
+        all_x = self.detector.extract_feat(all_imgs)  # Tensor:(3,512,38,50)
         x = []
         ref_x = []  # 就是把关键帧和参考帧一起提取特征，最后再分开
         for i in range(len(all_x)):
@@ -87,6 +87,7 @@ class SELSA(BaseVideoDetector):
             data_samples[0], num_ref_imgs=len(ref_img))
 
         # 提取完特征，经过RPN获得提议，为后面的SELSA聚合准备数据。
+        # 如果想替换RPN网络就从这里替换。
         # RPN forward and loss
         if self.detector.with_rpn:
             proposal_cfg = self.detector.train_cfg.get(
@@ -102,6 +103,7 @@ class SELSA(BaseVideoDetector):
              proposal_list) = self.detector.rpn_head.loss_and_predict(
                     x, rpn_data_samples, proposal_cfg=proposal_cfg)
             losses.update(rpn_losses)
+
             # 参考帧的提议框列表，bboxes、labels、scores
             ref_proposals_list = self.detector.rpn_head.predict(
                 ref_x, ref_data_samples)

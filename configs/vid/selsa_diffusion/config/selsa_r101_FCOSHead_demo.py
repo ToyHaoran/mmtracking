@@ -1,19 +1,43 @@
 _base_ = [
-    # dc5提取特征时输出1个(3,512,38,50)的特征图
-    # fpn提取特征时输出4个(3,512,x,x)的特征图。
-    '../../_base_/models/faster-rcnn_r50-dc5.py',
-    # 这里在本机调试，修改为demo数据集，而不是使用VID和DET的混合数据集
-    '../../_base_/datasets/imagenet_vid_demo.py',
-    '../../_base_/default_runtime.py'
+    './faster-rcnn_r50_fpn.py',
+    './imagenet_vid_demo.py',
+    './default_runtime.py'
 ]
+
+# custom_imports = dict(
+#     imports=['configs.vid.selsa_diffusion.DiffusionDet.diffusiondet'], allow_failed_imports=False)
+
 model = dict(
     type='SELSA',
     detector=dict(
         # r50和r101的主要区别
         backbone=dict(
-                    depth=101,
-                    init_cfg=dict(
-                        type='Pretrained', checkpoint='torchvision://resnet101')),
+            depth=101,
+            init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet101')),
+        # 使用FCOSHead替换RPN网络
+        neck=dict(
+            start_level=1,
+            add_extra_convs='on_output',  # 使用 P5
+            relu_before_extra_convs=True),
+        rpn_head=dict(
+            _delete_=True,  # 忽略未使用的旧设置
+            type='FCOSHead',
+            num_classes=1,  # 对于 rpn, num_classes = 1，如果 num_classes > 1，它将在 TwoStageDetector 中自动设置为1
+            in_channels=256,
+            stacked_convs=4,
+            feat_channels=256,
+            strides=[8, 16, 32, 64, 128],
+            loss_cls=dict(
+                type='FocalLoss',
+                use_sigmoid=True,
+                gamma=2.0,
+                alpha=0.25,
+                loss_weight=1.0),
+            loss_bbox=dict(type='IoULoss', loss_weight=1.0),
+            loss_centerness=dict(
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+        ),
+
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
             bbox_head=dict(
@@ -55,16 +79,16 @@ optim_wrapper = dict(
 param_scheduler = [
     dict(
         type='LinearLR',
-        start_factor=1.0 / 3,
+        start_factor=0.001,  # 原来1.0/3
         by_epoch=False,
         begin=0,
-        end=500),
+        end=1000),  # 慢慢增加 lr，否则损失变成 NAN， 原来500
     dict(
         type='MultiStepLR',
         begin=0,
-        end=7,
+        end=12,  # 原来7
         by_epoch=True,
-        milestones=[2, 5],
+        milestones=[8, 11],  # 原来[2,5]
         gamma=0.1)
 ]
 
