@@ -86,10 +86,10 @@ class DiffusionDetCriterion(nn.Module):
 
     def loss_classification(self, outputs, batch_gt_instances, indices):
         assert 'pred_logits' in outputs
-        src_logits = outputs['pred_logits']
+        src_logits = outputs['pred_logits']  # 获取预测的值
         target_classes_list = [
             gt.labels[J] for gt, (_, J) in zip(batch_gt_instances, indices)
-        ]
+        ]  # 获取GT标签
         target_classes = torch.full(
             src_logits.shape[:2],
             self.num_classes,
@@ -98,6 +98,7 @@ class DiffusionDetCriterion(nn.Module):
         for idx in range(len(batch_gt_instances)):
             target_classes[idx, indices[idx][0]] = target_classes_list[idx]
 
+        # 将预测和GT展平，计算分类损失。
         src_logits = src_logits.flatten(0, 1)
         target_classes = target_classes.flatten(0, 1)
         # comp focal loss.
@@ -105,7 +106,7 @@ class DiffusionDetCriterion(nn.Module):
         loss_cls = self.loss_cls(
             src_logits,
             target_classes,
-        ) / num_instances
+        ) / num_instances  # 计算分类损失时对损失进行归一化。
         return loss_cls
 
     def loss_boxes(self, outputs, batch_gt_instances, indices):

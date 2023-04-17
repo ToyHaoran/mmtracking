@@ -21,7 +21,7 @@ model = dict(
         rpn_head=dict(
             _delete_=True,  # 忽略未使用的旧设置
             type='DynamicDiffusionDetHead',
-            num_classes=1,  # 原来为80类，这里只需要分辨一个目标和背景就行
+            num_classes=80,  # 原来为80类，这里只需要分辨一个目标和背景就行
             feat_channels=256,
             num_proposals=100,  # TODO 原来500导致内存溢出，改为200才能跑起来
             num_heads=6,
@@ -47,7 +47,7 @@ model = dict(
             # criterion
             criterion=dict(
                 type='DiffusionDetCriterion',
-                num_classes=1,  # 这里也改为1
+                num_classes=80,  # 这里也改为1
                 assigner=dict(
                     type='DiffusionDetMatcher',
                     match_costs=[
