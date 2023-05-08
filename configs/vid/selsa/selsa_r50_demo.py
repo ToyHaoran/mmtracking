@@ -37,9 +37,13 @@ test_dataloader = val_dataloader
 
 # training schedule
 # train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
-train_cfg = dict(type='IterBasedTrainLoop', max_iters=2000, val_interval=1000)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=400, val_interval=400)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
+
+default_hooks = dict(
+    checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=400, max_keep_ckpts=2),
+)
 
 # optimizer
 optim_wrapper = dict(
@@ -60,7 +64,7 @@ param_scheduler = [
         begin=0,
         end=1000,
         by_epoch=False,
-        milestones=[100, 500],
+        milestones=[100, 300],
         gamma=0.1)
 ]
 

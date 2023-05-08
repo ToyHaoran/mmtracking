@@ -6,8 +6,10 @@ import torch
 import torch.nn.functional as F
 from mmcv.cnn.bricks import ConvModule
 from mmcv.cnn.bricks.transformer import build_positional_encoding
-# mmdet3.0.0rc6 重构了Detr系列，把 rc5的Transformer给分解了，暂时用rc5
-from mmdet.models.layers import Transformer
+# mmdet3.0.0rc6 重构了Detr系列，把 rc5的Transformer给分解了，下面注释的是rc5
+# from mmdet.models.layers import Transformer
+# 修改后如下：
+from mmdet.models.layers.transformer import Transformer
 from mmengine.model import BaseModule
 from mmengine.structures import InstanceData
 from torch import Tensor, nn

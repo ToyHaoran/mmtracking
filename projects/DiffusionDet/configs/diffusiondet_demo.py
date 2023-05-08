@@ -5,7 +5,7 @@ _base_ = [
 ]
 
 custom_imports = dict(
-    imports=['configs.vid.selsa_diffusion.DiffusionDet.diffusiondet'], allow_failed_imports=False)
+    imports=['projects.DiffusionDet.diffusiondet'], allow_failed_imports=False)
 
 # model settings
 model = dict(
@@ -165,8 +165,8 @@ optim_wrapper = dict(
 train_cfg = dict(
     _delete_=True,
     type='IterBasedTrainLoop',
-    max_iters=450000,  #
-    val_interval=75000)
+    max_iters=400,  # 原来450000
+    val_interval=400)
 
 # learning rate
 param_scheduler = [
@@ -181,8 +181,9 @@ param_scheduler = [
         gamma=0.1)
 ]
 
-default_hooks = dict(
-    checkpoint=dict(by_epoch=False, interval=75000, max_keep_ckpts=3))
+# default_hooks = dict(checkpoint=dict(by_epoch=False, interval=75000, max_keep_ckpts=3))
+default_hooks = dict(checkpoint=dict(by_epoch=False, interval=400, max_keep_ckpts=3))
+
 log_processor = dict(by_epoch=False)
 
 
