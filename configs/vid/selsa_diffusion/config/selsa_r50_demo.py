@@ -1,7 +1,7 @@
 _base_ = [
-    '../../_base_/models/faster-rcnn_r50-dc5.py',
-    '../../_base_/datasets/imagenet_vid_fgfa_style.py',
-    '../../_base_/default_runtime.py'
+    './faster-rcnn_r50_dc5.py',
+    './imagenet_vid_demo.py',
+    './default_runtime.py'
 ]
 model = dict(
     type='SELSA',
@@ -33,31 +33,31 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+# 7个epoch只能到0.67,感觉还要训练。
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=9, val_interval=3)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    # optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
-    optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
+    optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 
-# 学习率：2.5e-4持续3个epoch，然后2.5e-5一个，2.5e-6一个，可以达到80.4%的map。
+# learning rate
 param_scheduler = [
-    # dict(
-    #     type='LinearLR',
-    #     start_factor=1.0 / 3,
-    #     by_epoch=False,
-    #     begin=0,
-    #     end=500),
+    dict(
+        type='LinearLR',
+        start_factor=1.0 / 3,
+        by_epoch=False,
+        begin=0,
+        end=500),
     dict(
         type='MultiStepLR',
         begin=0,
-        end=5,
+        end=9,
         by_epoch=True,
-        milestones=[3, 4],
+        milestones=[4, 7],  # 第5轮后学习率已经很小了，到0.0001了。
         gamma=0.1)
 ]
 

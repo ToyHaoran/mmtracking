@@ -8,19 +8,21 @@ model = dict(
     detector=dict(
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
-            bbox_head=dict(
-                type='mmtrack.SelsaBBoxHead',
-                num_shared_fcs=2,
-                aggregator=dict(
-                    type='mmtrack.SelsaAggregator',
-                    in_channels=1024,
-                    num_attention_blocks=16)),
             bbox_roi_extractor=dict(
-                type='mmtrack.SingleRoIExtractor',
+                type='mmtrack.TemporalRoIAlign',
+                num_most_similar_points=2,
+                num_temporal_attention_blocks=4,
                 roi_layer=dict(
                     type='RoIAlign', output_size=7, sampling_ratio=2),
                 out_channels=512,
-                featmap_strides=[16]))))
+                featmap_strides=[16]),
+            bbox_head=dict(
+                type='mmtrack.SelsaBBoxHead',
+                num_shared_fcs=3,
+                aggregator=dict(
+                    type='mmtrack.SelsaAggregator',
+                    in_channels=1024,
+                    num_attention_blocks=16)))))
 
 # dataset settings
 val_dataloader = dict(
@@ -33,31 +35,30 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=7, val_interval=7)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    # optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
-    optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
+    optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 
-# 学习率：2.5e-4持续3个epoch，然后2.5e-5一个，2.5e-6一个，可以达到80.4%的map。
+# learning rate
 param_scheduler = [
-    # dict(
-    #     type='LinearLR',
-    #     start_factor=1.0 / 3,
-    #     by_epoch=False,
-    #     begin=0,
-    #     end=500),
+    dict(
+        type='LinearLR',
+        start_factor=1.0 / 3,
+        by_epoch=False,
+        begin=0,
+        end=500),
     dict(
         type='MultiStepLR',
         begin=0,
-        end=5,
+        end=7,
         by_epoch=True,
-        milestones=[3, 4],
+        milestones=[2, 5],
         gamma=0.1)
 ]
 

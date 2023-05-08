@@ -33,18 +33,20 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=220000, val_interval=220000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
+
+default_hooks = dict(
+    checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=70000, max_keep_ckpts=7),
+)
 
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    # optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
-    optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
+    optimizer=dict(type='SGD', lr=0.00025/4, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 
-# 学习率：2.5e-4持续3个epoch，然后2.5e-5一个，2.5e-6一个，可以达到80.4%的map。
 param_scheduler = [
     # dict(
     #     type='LinearLR',
@@ -55,9 +57,9 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=5,
-        by_epoch=True,
-        milestones=[3, 4],
+        end=220000,
+        by_epoch=False,
+        milestones=[110000, 165000],
         gamma=0.1)
 ]
 

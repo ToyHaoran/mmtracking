@@ -1,11 +1,19 @@
 _base_ = [
+    # dc5提取特征时输出1个(3,512,38,50)的特征图
+    # fpn提取特征时输出4个(3,512,x,x)的特征图。
     '../../_base_/models/faster-rcnn_r50-dc5.py',
-    '../../_base_/datasets/imagenet_vid_fgfa_style.py',
+    # 这里仅使用VID数据集(完整)，而不使用DET数据集
+    '../../_base_/datasets/imagenet_vid_only.py',
     '../../_base_/default_runtime.py'
 ]
 model = dict(
     type='SELSA',
     detector=dict(
+        # r50和r101的主要区别
+        backbone=dict(
+                    depth=101,
+                    init_cfg=dict(
+                        type='Pretrained', checkpoint='torchvision://resnet101')),
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
             bbox_head=dict(
@@ -33,31 +41,31 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+# 在TITAN上运行，一个epoch大约12H，显存占用8G。
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=12, val_interval=3)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    # optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
-    optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
+    optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 
-# 学习率：2.5e-4持续3个epoch，然后2.5e-5一个，2.5e-6一个，可以达到80.4%的map。
+# learning rate
 param_scheduler = [
-    # dict(
-    #     type='LinearLR',
-    #     start_factor=1.0 / 3,
-    #     by_epoch=False,
-    #     begin=0,
-    #     end=500),
+    dict(
+        type='LinearLR',
+        start_factor=1.0 / 3,
+        by_epoch=False,
+        begin=0,
+        end=500),
     dict(
         type='MultiStepLR',
         begin=0,
-        end=5,
+        end=7,
         by_epoch=True,
-        milestones=[3, 4],
+        milestones=[2, 5],
         gamma=0.1)
 ]
 

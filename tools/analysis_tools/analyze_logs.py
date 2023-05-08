@@ -66,17 +66,18 @@ def plot_curve(log_dicts, args):
             else:
                 xs = []
                 ys = []
-                num_iters_per_epoch = log_dict[epochs[0]]['iter'][-1]
+                iter = 'step' if 'step' in log_dict[1] else 'iter'  # 有的json中的iter是step，故设置个常量
+                num_iters_per_epoch = log_dict[epochs[0]][iter][-1]
                 for epoch in epochs:
-                    iters = log_dict[epoch]['iter']
-                    if log_dict[epoch]['mode'][-1] == 'val':
-                        iters = iters[:-1]
+                    iters = log_dict[epoch][iter]
+                    # if log_dict[epoch]['mode'][-1] == 'val':  # VID的log没有val
+                    #     iters = iters[:-1]
                     xs.append(
                         np.array(iters) + (epoch - 1) * num_iters_per_epoch)
                     ys.append(np.array(log_dict[epoch][metric][:len(iters)]))
                 xs = np.concatenate(xs)
                 ys = np.concatenate(ys)
-                plt.xlabel('iter')
+                plt.xlabel(iter)
                 plt.plot(
                     xs, ys, label=legend[i * num_metrics + j], linewidth=0.5)
             plt.legend()

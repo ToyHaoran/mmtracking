@@ -1,7 +1,7 @@
-"""仅使用VID数据集(而且是个demo数据集，非常小)"""
+"""仅使用VID数据集(完整数据集)"""
 # dataset settings
 dataset_type = 'ImagenetVIDDataset'
-data_root = 'data/VID_small/'
+data_root = 'data/ILSVRC/'
 
 # data pipeline
 train_pipeline = [

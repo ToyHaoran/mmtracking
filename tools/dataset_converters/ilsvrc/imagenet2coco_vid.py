@@ -62,7 +62,6 @@ cats_id_maps = {}
 for k, v in enumerate(CLASSES_ENCODES, 1):
     cats_id_maps[v] = k
 
-# 参数如：python ./tools/dataset_converters/ilsvrc/imagenet2coco_vid.py -i ./data/ILSVRC -o ./data/ILSVRC/annotations
 def parse_args():
     parser = argparse.ArgumentParser(
         description='ImageNet VID to COCO Video format')
@@ -237,6 +236,45 @@ def convert_vid(VID, ann_dir, save_dir, mode='train'):
     for i in range(1, len(CLASSES) + 1):
         # print(f'Class {i} {CLASSES[i - 1]} has {obj_num_classes[i]} objects.')
         print(f'Class {i} {CLASSES[i - 1]} has {obj_num_classes.get(i, 0)} objects.')
+    """  以下为VID完整数据集的信息。
+    -----ImageNet VID train------                             -----ImageNet VID val------
+    3862 videos                                               555 videos
+    1122397 images                                            176126 images
+    57834 train frames for video detection                    0 train frames for video detection
+    36265 images have no objects                              4046 images have no objects
+    1731913 objects                                           273505 objects
+    -----------------------                                   -----------------------
+    Class 1 airplane has 86067 objects.                       Class 1 airplane has 26387 objects.
+    Class 2 antelope has 59402 objects.                       Class 2 antelope has 7968 objects.
+    Class 3 bear has 51903 objects.                           Class 3 bear has 9780 objects.
+    Class 4 bicycle has 34897 objects.                        Class 4 bicycle has 8854 objects.
+    Class 5 bird has 128943 objects.                          Class 5 bird has 9862 objects.
+    Class 6 bus has 30186 objects.                            Class 6 bus has 6313 objects.
+    Class 7 car has 114571 objects.                           Class 7 car has 26690 objects.
+    Class 8 cattle has 53043 objects.                         Class 8 cattle has 11365 objects.
+    Class 9 dog has 129650 objects.                           Class 9 dog has 20237 objects.
+    Class 10 domestic_cat has 58899 objects.                  Class 10 domestic_cat has 11629 objects.
+    Class 11 elephant has 84078 objects.                      Class 11 elephant has 11934 objects.
+    Class 12 fox has 37186 objects.                           Class 12 fox has 9092 objects.
+    Class 13 giant_panda has 52984 objects.                   Class 13 giant_panda has 7593 objects.
+    Class 14 hamster has 38586 objects.                       Class 14 hamster has 5476 objects.
+    Class 15 horse has 54314 objects.                         Class 15 horse has 7939 objects.
+    Class 16 lion has 32196 objects.                          Class 16 lion has 2840 objects.
+    Class 17 lizard has 31817 objects.                        Class 17 lizard has 5972 objects.
+    Class 18 monkey has 70809 objects.                        Class 18 monkey has 10654 objects.
+    Class 19 motorcycle has 34456 objects.                    Class 19 motorcycle has 1139 objects.
+    Class 20 rabbit has 39177 objects.                        Class 20 rabbit has 5898 objects.
+    Class 21 red_panda has 47935 objects.                     Class 21 red_panda has 1149 objects.
+    Class 22 sheep has 35905 objects.                         Class 22 sheep has 4405 objects.
+    Class 23 snake has 32128 objects.                         Class 23 snake has 6393 objects.
+    Class 24 squirrel has 46891 objects.                      Class 24 squirrel has 12088 objects.
+    Class 25 tiger has 21062 objects.                         Class 25 tiger has 2614 objects.
+    Class 26 train has 105390 objects.                        Class 26 train has 13095 objects.
+    Class 27 turtle has 44573 objects.                        Class 27 turtle has 5761 objects.
+    Class 28 watercraft has 58774 objects.                    Class 28 watercraft has 6089 objects.
+    Class 29 whale has 39150 objects.                         Class 29 whale has 7379 objects.
+    Class 30 zebra has 76941 objects.                         Class 30 zebra has 6910 objects.
+    """
 
 def main():
     args = parse_args()
@@ -256,5 +294,7 @@ def main():
     convert_vid(VID_val, args.input, args.output, 'val')
 
 
+# python ./tools/dataset_converters/ilsvrc/imagenet2coco_vid.py -i ./data/ILSVRC -o ./data/ILSVRC/annotations
+# python ./tools/dataset_converters/ilsvrc/imagenet2coco_vid.py -i ./data/VID_small -o ./data/VID_small/annotations
 if __name__ == '__main__':
     main()

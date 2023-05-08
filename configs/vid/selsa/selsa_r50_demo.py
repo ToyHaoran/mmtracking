@@ -1,6 +1,9 @@
 _base_ = [
+    # dc5提取特征时输出1个(3,512,38,50)的特征图
+    # fpn提取特征时输出4个(3,512,x,x)的特征图。
     '../../_base_/models/faster-rcnn_r50-dc5.py',
-    '../../_base_/datasets/imagenet_vid_fgfa_style.py',
+    # 这里在本机调试，修改为demo数据集，而不是使用VID和DET的混合数据集
+    '../../_base_/datasets/imagenet_vid_demo.py',
     '../../_base_/default_runtime.py'
 ]
 model = dict(
@@ -33,18 +36,18 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+# train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=2000, val_interval=1000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    # optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
     optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 
-# 学习率：2.5e-4持续3个epoch，然后2.5e-5一个，2.5e-6一个，可以达到80.4%的map。
+# learning rate
 param_scheduler = [
     # dict(
     #     type='LinearLR',
@@ -55,9 +58,9 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=5,
-        by_epoch=True,
-        milestones=[3, 4],
+        end=1000,
+        by_epoch=False,
+        milestones=[100, 500],
         gamma=0.1)
 ]
 

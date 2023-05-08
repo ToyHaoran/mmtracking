@@ -194,6 +194,6 @@ def main():
                 dict(id=k, name=v, encode_name=CLASSES_ENCODES[k - 1]))
     convert_det(DET, args.input, args.output)
 
-
+# python ./tools/dataset_converters/ilsvrc/imagenet2coco_det.py -i ./data/ILSVRC -o ./data/ILSVRC/annotations
 if __name__ == '__main__':
     main()
