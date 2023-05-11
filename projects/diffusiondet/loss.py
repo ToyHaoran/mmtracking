@@ -54,9 +54,9 @@ class DiffusionDetCriterion(nn.Module):
         self.loss_giou = MODELS.build(loss_giou)
 
     def forward(self, outputs, batch_gt_instances, batch_img_metas):
-        batch_indices = self.assigner(outputs, batch_gt_instances,
-                                      batch_img_metas)
-        # Compute all the requested losses
+        # 调用DiffusionDetMatcher.forward()，将提议框与真实框进行匹配？
+        batch_indices = self.assigner(outputs, batch_gt_instances, batch_img_metas)
+        # Compute all the requested losses  处理最后一个Head的输出
         loss_cls = self.loss_classification(outputs, batch_gt_instances,
                                             batch_indices)
         loss_bbox, loss_giou = self.loss_boxes(outputs, batch_gt_instances,
@@ -65,7 +65,7 @@ class DiffusionDetCriterion(nn.Module):
         losses = dict(
             loss_cls=loss_cls, loss_bbox=loss_bbox, loss_giou=loss_giou)
 
-        if self.deep_supervision:
+        if self.deep_supervision:  # 处理前5个Head的输出
             assert 'aux_outputs' in outputs
             for i, aux_outputs in enumerate(outputs['aux_outputs']):
                 batch_indices = self.assigner(aux_outputs, batch_gt_instances,

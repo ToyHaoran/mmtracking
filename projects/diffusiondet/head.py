@@ -277,35 +277,34 @@ class DynamicDiffusionDetHead(nn.Module):
                              (1. - alphas_cumprod))
 
     def forward(self, features, init_bboxes, init_t, init_features=None):
-        time = self.time_mlp(init_t, )
+        time = self.time_mlp(init_t, )  # Tensor(2,1024)
 
         inter_class_logits = []
         inter_pred_bboxes = []
 
         bs = len(features[0])
-        bboxes = init_bboxes
+        bboxes = init_bboxes  # 噪声框
 
         if init_features is not None:
             init_features = init_features[None].repeat(1, bs, 1)
             proposal_features = init_features.clone()
         else:
             proposal_features = None
-
+        # 将特征图和噪声框输入模型(6个SingleDiffusionDetHead)，得到每个提议的类得分、边界框、特征。
         for head_idx, single_head in enumerate(self.head_series):
             class_logits, pred_bboxes, proposal_features = single_head(
                 features, bboxes, proposal_features, self.roi_extractor, time)
             if self.deep_supervision:
                 inter_class_logits.append(class_logits)
                 inter_pred_bboxes.append(pred_bboxes)
-            bboxes = pred_bboxes.detach()
+            bboxes = pred_bboxes.detach()  # 这里体现了迭代的思想，将预测出来的边界框再次送入模型进行预测。
 
         if self.deep_supervision:
-            return torch.stack(inter_class_logits), torch.stack(
-                inter_pred_bboxes)
+            return torch.stack(inter_class_logits), torch.stack(inter_pred_bboxes)
         else:
             return class_logits[None, ...], pred_bboxes[None, ...]
 
-    # 为了融入框架，自己写一个方法，就不用继承base_dense_head了。
+    # 为了融入框架，自己写一个方法，就不用继承base_dense_head了，失败了。
     def loss_and_predict(
             self,
             x: Tuple[Tensor],
@@ -332,30 +331,33 @@ class DynamicDiffusionDetHead(nn.Module):
         Returns:
             dict: A dictionary of loss components.
         """
-        prepare_outputs = self.prepare_training_targets(batch_data_samples)
-        (batch_gt_instances, batch_pred_instances, batch_gt_instances_ignore,
-         batch_img_metas) = prepare_outputs
 
+        prepare_outputs = self.prepare_training_targets(batch_data_samples)  # 对目标边界框加噪
+        (batch_gt_instances, batch_pred_instances, batch_gt_instances_ignore, batch_img_metas) = prepare_outputs
+
+        # (噪声框的绝对坐标) pred_instances.diff_bboxes_abs = diff_bboxes(相对坐标) * image_size
         batch_diff_bboxes = torch.stack([
-            pred_instances.diff_bboxes_abs
-            for pred_instances in batch_pred_instances
+            pred_instances.diff_bboxes_abs for pred_instances in batch_pred_instances
         ])
-        batch_time = torch.stack(
-            [pred_instances.time for pred_instances in batch_pred_instances])
 
-        pred_logits, pred_bboxes = self(x, batch_diff_bboxes, batch_time)
+        # time通过控制时间步长的随机性，可以使得每次运行加噪过程时得到的结果不同，增加模型的鲁棒性和泛化能力。
+        batch_time = torch.stack(
+            [pred_instances.time for pred_instances in batch_pred_instances])  # 其中一次是Tensor([507,977]) 每次都不一样。
+
+        # pred_logits为分类得分(6,2,200,80)，pred_bboxes为边界框坐标(6,2,200,4)，6表示6个SingleDiffusionDetHead的输出。
+        pred_logits, pred_bboxes = self(x, batch_diff_bboxes, batch_time)  # 调用forward函数
 
         output = {
-            'pred_logits': pred_logits[-1],
+            'pred_logits': pred_logits[-1],  # 只要最后一次Head的结果
             'pred_boxes': pred_bboxes[-1]
         }
-        if self.deep_supervision:
-            output['aux_outputs'] = [{
+        if self.deep_supervision:  # 每个预测层的输出都可以用于计算损失，这样可以让每个层次都有机会学习到更多的特征，从而提高模型的性能。
+            output['aux_outputs'] = [{  # 剩下的5个Head的输出结果。
                 'pred_logits': a,
                 'pred_boxes': b
             } for a, b in zip(pred_logits[:-1], pred_bboxes[:-1])]
 
-        losses = self.criterion(output, batch_gt_instances, batch_img_metas)
+        losses = self.criterion(output, batch_gt_instances, batch_img_metas)  # 调用 DiffusionDetCriterion.forward
         return losses
 
     def prepare_training_targets(self, batch_data_samples):
@@ -403,7 +405,8 @@ class DynamicDiffusionDetHead(nn.Module):
     def prepare_diffusion(self, gt_boxes, image_size):
         """对边界框进行加噪"""
         device = gt_boxes.device
-        time = torch.randint(0, self.timesteps, (1, ), dtype=torch.long, device=device)  # 确定随机步长
+        # time用于控制加噪过程的随机性，通过控制时间步长的随机性，可以使得每次运行加噪过程时得到的结果不同，增加模型的鲁棒性和泛化能力。
+        time = torch.randint(0, self.timesteps, (1, ), dtype=torch.long, device=device)
         noise = torch.randn(self.num_proposals, 4, device=device)  # 产生标准正态分布
 
         num_gt = gt_boxes.shape[0]  # gt框数目
@@ -422,7 +425,7 @@ class DynamicDiffusionDetHead(nn.Module):
             random.shuffle(select_mask)
             x_start = gt_boxes[select_mask]
 
-        x_start = (x_start * 2. - 1.) * self.snr_scale
+        x_start = (x_start * 2. - 1.) * self.snr_scale  # 将x_start的坐标值进行缩放和平移，以控制加噪的强度
 
         # noise sample
         x = self.q_sample(x_start=x_start, time=time, noise=noise)  # 前向加噪过程

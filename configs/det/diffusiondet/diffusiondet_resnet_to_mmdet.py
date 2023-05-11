@@ -89,9 +89,9 @@ def main():
 
 """
 模型转换任务
-python projects/DiffusionDet/model_converters/diffusiondet_resnet_to_mmdet.py ${DiffusionDet ckpt path} ${MMDetectron ckpt path}
-checkpoint/DiffusionDet/diffdet_coco_res50.pth
-checkpoint/MMDetection/diffdet_coco_res50.pth
+python configs/det/diffusiondet/diffusiondet_resnet_to_mmdet.py ${DiffusionDet ckpt path} ${MMDetectron ckpt path}
+work_dirs/diffusiondet_demo/diffdet_coco_res50_official.pth
+work_dirs/diffusiondet_demo/diffdet_r50_demo.pth
 """
 if __name__ == '__main__':
     main()
