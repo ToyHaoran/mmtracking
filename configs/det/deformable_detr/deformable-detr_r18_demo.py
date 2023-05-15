@@ -1,10 +1,10 @@
 _base_ = [
-    '../_base_/datasets/coco_detection.py',
+    '../_base_/coco_detection.py',
     '../_base_/default_runtime.py'
 ]
 model = dict(
     type='DeformableDETR',
-    num_queries=300,
+    num_queries=100,  # 300在本机跑不起来
     num_feature_levels=4,
     with_box_refine=False,
     as_two_stage=False,
@@ -16,32 +16,33 @@ model = dict(
         pad_size_divisor=1),
     backbone=dict(
         type='ResNet',
-        depth=50,
+        depth=18,
         num_stages=4,
         out_indices=(1, 2, 3),
         frozen_stages=1,
         norm_cfg=dict(type='BN', requires_grad=False),
         norm_eval=True,
         style='pytorch',
-        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet18')),
     neck=dict(
         type='ChannelMapper',
-        in_channels=[512, 1024, 2048],
+        in_channels=[128, 256, 512],
         kernel_size=1,
         out_channels=256,
         act_cfg=None,
         norm_cfg=dict(type='GN', num_groups=32),
         num_outs=4),
     encoder=dict(  # DeformableDetrTransformerEncoder
-        num_layers=6,
+        num_layers=3,  # 从6改为3 避免爆显存
         layer_cfg=dict(  # DeformableDetrTransformerEncoderLayer
             self_attn_cfg=dict(  # MultiScaleDeformableAttention
                 embed_dims=256,
+                num_heads=8,
                 batch_first=True),
             ffn_cfg=dict(
                 embed_dims=256, feedforward_channels=1024, ffn_drop=0.1))),
     decoder=dict(  # DeformableDetrTransformerDecoder
-        num_layers=6,
+        num_layers=3,
         return_intermediate=True,
         layer_cfg=dict(  # DeformableDetrTransformerDecoderLayer
             self_attn_cfg=dict(  # MultiheadAttention
@@ -137,9 +138,8 @@ optim_wrapper = dict(
         }))
 
 # learning policy
-max_epochs = 50
-train_cfg = dict(
-    type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
+max_epochs = 3
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=3)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
