@@ -12,7 +12,7 @@ model = dict(
         bgr_to_rgb=True,
         pad_size_divisor=1),
     backbone=dict(
-        type='ResNet',
+        type='ResNet',  # 提取图像特征，并将图像尺度缩小
         depth=18,
         num_stages=4,
         out_indices=(3, ),
@@ -21,9 +21,10 @@ model = dict(
         norm_eval=True,
         style='pytorch',
         init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet18')),
+    # ResNet50的输出 [B, 2048, W_feat, H_feat]
     neck=dict(
         type='ChannelMapper',
-        in_channels=[512],  # r50是2048，r18是512
+        in_channels=[512],  # r50是2048，r18是512；
         kernel_size=1,
         out_channels=256,
         act_cfg=None,
