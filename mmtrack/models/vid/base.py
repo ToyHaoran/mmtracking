@@ -39,21 +39,6 @@ class BaseVideoDetector(BaseModel, metaclass=ABCMeta):
             for param in m.parameters():
                 param.requires_grad = False
 
-    @property
-    def with_detector(self) -> bool:
-        """bool: whether the framework has a detector"""
-        return hasattr(self, 'detector') and self.detector is not None
-
-    @property
-    def with_motion(self) -> bool:
-        """bool: whether the framework has a motion model"""
-        return hasattr(self, 'motion') and self.motion is not None
-
-    @property
-    def with_aggregator(self) -> bool:
-        """bool: whether the framework has a aggregator"""
-        return hasattr(self, 'aggregator') and self.aggregator is not None
-
     def forward(self,
                 inputs: Dict[str, Tensor],
                 data_samples: OptSampleList = None,
@@ -132,3 +117,18 @@ class BaseVideoDetector(BaseModel, metaclass=ABCMeta):
         """
         raise NotImplementedError(
             "_forward function (namely 'tensor' mode) is not supported now")
+
+    @property
+    def with_detector(self) -> bool:
+        """bool: whether the framework has a detector"""
+        return hasattr(self, 'detector') and self.detector is not None
+
+    @property
+    def with_motion(self) -> bool:
+        """bool: whether the framework has a motion model"""
+        return hasattr(self, 'motion') and self.motion is not None
+
+    @property
+    def with_aggregator(self) -> bool:
+        """bool: whether the framework has a aggregator"""
+        return hasattr(self, 'aggregator') and self.aggregator is not None
