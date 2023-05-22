@@ -143,12 +143,19 @@ class PTSEFormer(VideoDetectionTransformer):
             - decoder_inputs_dict (dict): The keyword args dictionary of
               `self.forward_decoder()`, which includes 'memory_mask'.
         """
-        batch_size = mlvl_feats[0].size(0)
+
+        batch_size = mlvl_feats[0].size(0)  # 注意这里的batch_size只有第一个是关键帧，剩下的是参考帧。
 
         # construct binary masks for the transformer.
-        assert batch_data_samples is not None
+        # assert batch_data_samples is not None
+        assert len(batch_data_samples) is 1  # batch_data_samples就一个元素
         batch_input_shape = batch_data_samples[0].batch_input_shape
-        img_shape_list = [sample.img_shape for sample in batch_data_samples]
+
+        # img_shape_list = [sample.img_shape for sample in batch_data_samples]  # 改一下，取得每张图片的实际shape
+        key_img_shape = batch_data_samples[0].get("img_shape")
+        ref_img_shape = batch_data_samples[0].get("ref_img_shape")
+        img_shape_list = [key_img_shape, *ref_img_shape]
+
         input_img_h, input_img_w = batch_input_shape
         masks = mlvl_feats[0].new_ones((batch_size, input_img_h, input_img_w))
         for img_id in range(batch_size):
@@ -538,3 +545,18 @@ class PTSEFormer(VideoDetectionTransformer):
         pos = torch.stack((pos[:, :, :, 0::2].sin(), pos[:, :, :, 1::2].cos()),
                           dim=4).flatten(2)
         return pos
+
+    def separate_keyframes_and_reference_frames(self, img_feats):
+        """
+        因为是放在一起进行提取特征和处理的，所以要分离关键帧和参考帧。
+        Args:
+            img_feats: (bs, dim, h, w)，这里的bs只有第一个是关键帧，其他为参考帧。
+
+        Returns: Tuple(关键帧x, 参考帧ref_x)
+        """
+        x = []
+        ref_x = []  # 就是把关键帧和参考帧一起提取的特征分开
+        for i in range(len(img_feats)):
+            x.append(img_feats[i][[0]])  # 只有第一个是关键帧，关键帧的4个level特征图
+            ref_x.append(img_feats[i][1:])  # 参考帧的4个level特征图
+        return x, ref_x

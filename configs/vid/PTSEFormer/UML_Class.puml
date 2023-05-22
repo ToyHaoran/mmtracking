@@ -1,0 +1,269 @@
+@startuml
+'https://plantuml.com/class-diagram
+
+class PTSEFormer{
+backbone
+bbox_embed
+cfg
+class_embed
+corr
+d_decoder
+d_encoder
+input_proj
+level_embed
+our_decoder
+pre_decoder
+qln
+query_embed
+reference_points
+reference_points1
+s_decoder1
+s_decoder2
+__init__()
+build_input_proj()
+init_paras()
+forward()
+d_enc()
+d_dec()
+pre_dec()
+cal_loss_tc_like()
+cal_loss()
+get_feat()
+get_valid_ratio()
+prepare_enc()
+prepare_dec()
+prepare_dec1()
+_set_aux_loss()
+}
+
+PTSEFormer *-- DeformableTransformer
+class DeformableTransformer{
+__init__()
+_reset_parameters()
+get_proposal_pos_embed()
+gen_encoder_output_proposals()
+get_valid_ratio()
+prepare_input()
+forward()
+d_model
+decoder
+enc_output
+enc_output_norm
+encoder
+level_embed
+nhead
+pos_trans
+pos_trans_norm
+reference_points
+two_stage
+two_stage_num_proposals
+}
+DeformableTransformer *-- DeformableTransformerEncoder
+DeformableTransformer *-- DeformableTransformerDecoder
+
+PTSEFormer *-- DeformableTransformerEncoder
+class DeformableTransformerEncoder{
+__init__()
+get_reference_points()
+forward()
+layers
+num_layers
+}
+class DeformableTransformerEncoderLayer{
+__init__()
+with_pos_embed()
+forward_ffn()
+forward()
+activation
+dropout1
+dropout2
+dropout3
+linear1
+linear2
+norm1
+norm2
+self_attn
+}
+DeformableTransformerEncoder *-- DeformableTransformerEncoderLayer
+DeformableTransformerEncoderLayer *-- MultiHeadAttention
+
+PTSEFormer *-- DeformableTransformerDecoder
+class DeformableTransformerDecoder{
+__init__()
+forward()
+bbox_embed
+class_embed
+layers
+num_layers
+return_intermediate
+}
+class DeformableTransformerDecoderLayer{
+__init__()
+with_pos_embed()
+forward_ffn()
+forward()
+activation
+cross_attn
+dropout1
+dropout2
+dropout3
+dropout4
+linear1
+linear2
+mode
+norm1
+norm2
+norm3
+self_attn
+}
+DeformableTransformerDecoder *-- DeformableTransformerDecoderLayer
+DeformableTransformerDecoderLayer  *-- MultiHeadAttention
+
+PTSEFormer *-- TransformerEncoder
+class TransformerEncoder{
+__init__()
+forward()
+layers
+norm
+num_layers
+}
+class TransformerEncoderLayer{
+__init__()
+with_pos_embed()
+forward_post()
+forward_pre()
+forward()
+activation
+dropout
+dropout1
+dropout2
+linear1
+linear2
+norm1
+norm2
+normalize_before
+self_attn
+}
+TransformerEncoder *-- TransformerEncoderLayer
+TransformerEncoderLayer *-- MultiHeadAttention
+
+PTSEFormer *-- TransformerDecoder
+class TransformerDecoder{
+__init__()
+forward()
+layers
+norm
+num_layers
+return_intermediate
+}
+class TransformerDecoderLayer{
+__init__()
+with_pos_embed()
+forward_post()
+forward_pre()
+forward()
+activation
+dropout
+dropout1
+dropout2
+dropout3
+linear1
+linear2
+multihead_attn
+norm1
+norm2
+norm3
+normalize_before
+self_attn
+}
+TransformerDecoder *-- TransformerDecoderLayer
+TransformerDecoderLayer *-- MultiHeadAttention
+
+PTSEFormer *-- SimpleDecoderV2
+class SimpleDecoderV2{
+__init__()
+forward()
+layers
+norm
+num_layers
+return_intermediate
+}
+class SimpleDecoderLayerV2{
+__init__()
+with_pos_embed()
+forward_post()
+forward_pre()
+forward()
+activation
+dropout
+dropout1
+dropout2
+dropout3
+linear1
+linear2
+multihead_attn
+norm1
+norm2
+norm3
+normalize_before
+}
+SimpleDecoderV2 *-- SimpleDecoderLayerV2
+SimpleDecoderLayerV2 *-- MultiHeadAttention
+
+PTSEFormer *-- OursDecoderV2
+class OursDecoderV2{
+__init__()
+forward()
+layers
+norm
+num_layers
+return_intermediate
+}
+class OursDecoderLayerV2{
+__init__()
+with_pos_embed()
+forward_post()
+forward_pre()
+forward()
+activation
+dropout
+dropout1
+dropout2
+dropout3
+linear1
+linear2
+multihead_attn
+norm1
+norm2
+norm3
+normalize_before
+se
+}
+OursDecoderV2 *-- OursDecoderLayerV2
+OursDecoderLayerV2 *-- MultiHeadAttention
+
+class MultiHeadAttention{
+__init__()
+_reset_parameters()
+__setstate__()
+forward()
+
+add_zero_attn
+batch_first
+bias_k
+bias_v
+dropout
+embed_dim
+head_dim
+in_proj_bias
+in_proj_weight
+k_proj_weight
+kdim
+num_heads
+out_proj
+q_proj_weight
+v_proj_weight
+vdim
+}
+
+@enduml
