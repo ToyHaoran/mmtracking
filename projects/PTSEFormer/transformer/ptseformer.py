@@ -1,47 +1,80 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from abc import ABCMeta, abstractmethod
+from typing import Dict, List, Tuple, Union
 import math
-from typing import Dict, Tuple
-
 import torch
-import torch.nn.functional as F
-from mmcv.cnn.bricks.transformer import MultiScaleDeformableAttention
-from mmengine.model import xavier_init
 from torch import Tensor, nn
-from torch.nn.init import normal_
+import torch.nn.functional as F
 
 from mmtrack.registry import MODELS
-from mmdet.structures import OptSampleList
-from mmdet.utils import OptConfigType
+from mmtrack.models import BaseVideoDetector
+from mmdet.structures import OptSampleList, SampleList
+
+
+
+from mmcv.cnn.bricks.transformer import MultiScaleDeformableAttention
+
+from mmdet.utils import ConfigType, OptConfigType, OptMultiConfig
 from mmdet.models.layers import (DeformableDetrTransformerDecoder,
                       DeformableDetrTransformerEncoder, SinePositionalEncoding)
-from .base_detr import VideoDetectionTransformer
 
 
 @MODELS.register_module()
-class PTSEFormer(VideoDetectionTransformer):
-    r""" PTSEFormer代码实现，从源码移植过来的。
+class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
+    r"""Base class for Video Detection Transformer. 是从DetectionTransformer修改而来。
+
+    In Detection Transformer, an encoder is used to process output features of
+    neck, then several queries interact with the encoder features using a
+    decoder and do the regression and classification with the bounding box
+    head.
 
     Args:
+        backbone (:obj:`ConfigDict` or dict): Config of the backbone.
+        neck (:obj:`ConfigDict` or dict, optional): Config of the neck.
+            Defaults to None.
+        encoder (:obj:`ConfigDict` or dict, optional): Config of the
+            Transformer encoder. Defaults to None.
         decoder (:obj:`ConfigDict` or dict, optional): Config of the
             Transformer decoder. Defaults to None.
         bbox_head (:obj:`ConfigDict` or dict, optional): Config for the
             bounding box head module. Defaults to None.
-        with_box_refine (bool, optional): Whether to refine the references
-            in the decoder. Defaults to `False`.
-        as_two_stage (bool, optional): Whether to generate the proposal
-            from the outputs of encoder. Defaults to `False`.
-        num_feature_levels (int, optional): Number of feature levels.
-            Defaults to 4.
+        positional_encoding (:obj:`ConfigDict` or dict, optional): Config
+            of the positional encoding module. Defaults to None.
+        num_queries (int, optional): Number of decoder query in Transformer.
+            Defaults to 100.
+        train_cfg (:obj:`ConfigDict` or dict, optional): Training config of
+            the bounding box head module. Defaults to None.
+        test_cfg (:obj:`ConfigDict` or dict, optional): Testing config of
+            the bounding box head module. Defaults to None.
+        data_preprocessor (dict or ConfigDict, optional): The pre-process
+            config of :class:`BaseDataPreprocessor`.  it usually includes,
+            ``pad_size_divisor``, ``pad_value``, ``mean`` and ``std``.
+            Defaults to None.
+        init_cfg (:obj:`ConfigDict` or dict, optional): the config to control
+            the initialization. Defaults to None.
     """
 
     def __init__(self,
-                 *args,
-                 decoder: OptConfigType = None,
-                 bbox_head: OptConfigType = None,
                  with_box_refine: bool = False,
                  as_two_stage: bool = False,
                  num_feature_levels: int = 4,
-                 **kwargs) -> None:
+
+                 backbone: ConfigType = None,
+                 neck: OptConfigType = None,
+                 encoder: OptConfigType = None,
+                 decoder: OptConfigType = None,
+                 bbox_head: OptConfigType = None,
+
+                 positional_encoding: OptConfigType = None,
+                 num_queries: int = 100,
+                 train_cfg: OptConfigType = None,
+                 test_cfg: OptConfigType = None,
+                 data_preprocessor: OptConfigType = None,
+                 init_cfg: OptMultiConfig = None) -> None:
+
+        super().__init__(
+            data_preprocessor=data_preprocessor, init_cfg=init_cfg)
+
         self.with_box_refine = with_box_refine
         self.as_two_stage = as_two_stage
         self.num_feature_levels = num_feature_levels
@@ -62,7 +95,23 @@ class PTSEFormer(VideoDetectionTransformer):
                 if self.as_two_stage else decoder['num_layers']
             bbox_head['as_two_stage'] = as_two_stage
 
-        super().__init__(*args, decoder=decoder, bbox_head=bbox_head, **kwargs)
+        # process args
+        bbox_head.update(train_cfg=train_cfg)
+        bbox_head.update(test_cfg=test_cfg)
+        self.train_cfg = train_cfg
+        self.test_cfg = test_cfg
+        self.encoder = encoder
+        self.decoder = decoder
+        self.positional_encoding = positional_encoding
+        self.num_queries = num_queries
+
+        # init model layers
+        self.backbone = MODELS.build(backbone)
+        if neck is not None:
+            self.neck = MODELS.build(neck)
+        self.bbox_head = MODELS.build(bbox_head)
+        self._init_layers()
+
 
     def _init_layers(self) -> None:
         """Initialize layers except for backbone, neck and bbox_head."""
@@ -94,23 +143,185 @@ class PTSEFormer(VideoDetectionTransformer):
         else:
             self.reference_points_fc = nn.Linear(self.embed_dims, 2)
 
-    def init_weights(self) -> None:
-        """Initialize weights for Transformer and other components."""
-        super().init_weights()
-        for coder in self.encoder, self.decoder:
-            for p in coder.parameters():
-                if p.dim() > 1:
-                    nn.init.xavier_uniform_(p)
-        for m in self.modules():
-            if isinstance(m, MultiScaleDeformableAttention):
-                m.init_weights()
-        if self.as_two_stage:
-            nn.init.xavier_uniform_(self.memory_trans_fc.weight)
-            nn.init.xavier_uniform_(self.pos_trans_fc.weight)
-        else:
-            xavier_init(
-                self.reference_points_fc, distribution='uniform', bias=0.)
-        normal_(self.level_embed)
+    def loss(self, inputs: Tensor,
+             data_samples: SampleList) -> Union[dict, list]:
+        """Calculate losses from a batch of inputs and data samples.
+
+        Args:
+            inputs (dict[Tensor]): of shape (N=bs, T, C, H, W) encoding
+                input images. Typically these should be mean centered and std
+                scaled. The N denotes batch size and must be 1 in SELSA method.
+                The T denotes the number of key/reference frames.
+                - img (Tensor) : The key images.
+                - ref_img (Tensor): The reference images.
+            data_samples (list[:obj:`TrackDataSample`]): The batch
+                data samples. It usually includes information such
+                as `gt_instance`.
+
+        Returns:
+            dict: A dictionary of loss components
+        """
+        img = inputs['img']  # 关键帧 Tensor:(bs=1,1,3,608,800) T=1表示1个关键帧
+        assert img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
+        assert img.size(0) == 1, 'video detectors only support 1 batch size per gpu for now.'
+        assert img.size(1) == 1, 'video detector only has 1 key image per batch.'
+        img = img[0]
+
+        ref_img = inputs['ref_img']  # 参考帧 Tensor:(1,2,3,608,800) T=2表示2个参考帧
+        assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
+        assert ref_img.size(0) == 1, 'video detectors only support 1 batch size per gpu for now.'
+        ref_img = ref_img[0]
+
+        assert len(data_samples) == 1, 'video detectors only support 1 batch size per gpu for now.'
+
+        all_imgs = torch.cat((img, ref_img), dim=0)  # 把关键帧和参考帧 0维连接 Tensor:(T=3,C=3,H=608,W=800)、
+
+        # 把关键帧和参考帧放在一起提取特征：经过backbone(ResNet)，经过neck(ChannelMapper)，提取特征。后面在pre_transformer会分开处理。
+        img_feats = self.extract_feat(all_imgs)  # 4个level的Tensor:(3,256,38,50)
+
+        # 进入transformer流程：'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'
+        head_inputs_dict = self.forward_transformer(img_feats, data_samples)
+
+        # 计算loss
+        losses = self.bbox_head.loss(**head_inputs_dict, batch_data_samples=data_samples)
+
+        return losses
+
+    def predict(self,
+                batch_inputs: Tensor,
+                batch_data_samples: SampleList,
+                rescale: bool = True) -> SampleList:
+        """Predict results from a batch of inputs and data samples with post-
+        processing.
+
+        Args:
+            batch_inputs (Tensor): Inputs, has shape (bs, dim, H, W).
+            batch_data_samples (List[:obj:`DetDataSample`]): The batch
+                data samples. It usually includes information such
+                as `gt_instance` or `gt_panoptic_seg` or `gt_sem_seg`.
+            rescale (bool): Whether to rescale the results.
+                Defaults to True.
+
+        Returns:
+            list[:obj:`DetDataSample`]: Detection results of the input images.
+            Each DetDataSample usually contain 'pred_instances'. And the
+            `pred_instances` usually contains following keys.
+
+            - scores (Tensor): Classification scores, has a shape
+              (num_instance, )
+            - labels (Tensor): Labels of bboxes, has a shape
+              (num_instances, ).
+            - bboxes (Tensor): Has a shape (num_instances, 4),
+              the last dimension 4 arrange as (x1, y1, x2, y2).
+        """
+        img_feats = self.extract_feat(batch_inputs)
+        head_inputs_dict = self.forward_transformer(img_feats,
+                                                    batch_data_samples)
+        results_list = self.bbox_head.predict(
+            **head_inputs_dict,
+            rescale=rescale,
+            batch_data_samples=batch_data_samples)
+        batch_data_samples = self.add_pred_to_datasample(
+            batch_data_samples, results_list)
+        return batch_data_samples
+
+    def _forward(
+            self,
+            batch_inputs: Tensor,
+            batch_data_samples: OptSampleList = None) -> Tuple[List[Tensor]]:
+        """Network forward process. Usually includes backbone, neck and head
+        forward without any post-processing.
+
+         Args:
+            batch_inputs (Tensor): Inputs, has shape (bs, dim, H, W).
+            batch_data_samples (List[:obj:`DetDataSample`], optional): The
+                batch data samples. It usually includes information such
+                as `gt_instance` or `gt_panoptic_seg` or `gt_sem_seg`.
+                Defaults to None.
+
+        Returns:
+            tuple[Tensor]: A tuple of features from ``bbox_head`` forward.
+        """
+        img_feats = self.extract_feat(batch_inputs)
+        head_inputs_dict = self.forward_transformer(img_feats,
+                                                    batch_data_samples)
+        results = self.bbox_head.forward(**head_inputs_dict)
+        return results
+
+    def forward_transformer(self,
+                            img_feats: Tuple[Tensor],
+                            batch_data_samples: OptSampleList = None) -> Dict:
+        """Forward process of Transformer, which includes four steps:
+        'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'. We
+        summarized the parameters flow of the existing DETR-like detector,
+        which can be illustrated as follow:
+
+        .. code:: text
+
+                 img_feats & batch_data_samples
+                               |
+                               V
+                      +-----------------+
+                      | pre_transformer |
+                      +-----------------+
+                          |          |
+                          |          V
+                          |    +-----------------+
+                          |    | forward_encoder |
+                          |    +-----------------+
+                          |             |
+                          |             V
+                          |     +---------------+
+                          |     |  pre_decoder  |
+                          |     +---------------+
+                          |         |       |
+                          V         V       |
+                      +-----------------+   |
+                      | forward_decoder |   |
+                      +-----------------+   |
+                                |           |
+                                V           V
+                               head_inputs_dict
+
+        Args:
+            img_feats (tuple[Tensor]): Tuple of feature maps from neck. Each
+                    feature map has shape (bs, dim, H, W).
+            batch_data_samples (list[:obj:`DetDataSample`], optional): The
+                batch data samples. It usually includes information such
+                as `gt_instance` or `gt_panoptic_seg` or `gt_sem_seg`.
+                Defaults to None.
+
+        Returns:
+            dict: The dictionary of bbox_head function inputs, which always
+            includes the `hidden_states` of the decoder output and may contain
+            `references` including the initial and intermediate references.
+        """
+        encoder_inputs_dict, decoder_inputs_dict = self.pre_transformer(
+            img_feats, batch_data_samples)
+
+        encoder_outputs_dict = self.forward_encoder(**encoder_inputs_dict)
+
+        tmp_dec_in, head_inputs_dict = self.pre_decoder(**encoder_outputs_dict)
+        decoder_inputs_dict.update(tmp_dec_in)
+
+        decoder_outputs_dict = self.forward_decoder(**decoder_inputs_dict)
+        head_inputs_dict.update(decoder_outputs_dict)
+        return head_inputs_dict
+
+    def extract_feat(self, batch_inputs: Tensor) -> Tuple[Tensor]:
+        """Extract features.
+
+        Args:
+            batch_inputs (Tensor): Image tensor, has shape (bs, dim, H, W).
+
+        Returns:
+            tuple[Tensor]: Tuple of feature maps from neck. Each feature map
+            has shape (bs, dim, H, W).
+        """
+        x = self.backbone(batch_inputs)
+        if self.with_neck:
+            x = self.neck(x)
+        return x
 
     def pre_transformer(
             self,
@@ -221,6 +432,7 @@ class PTSEFormer(VideoDetectionTransformer):
             level_start_index=level_start_index,
             valid_ratios=valid_ratios)
         return encoder_inputs_dict, decoder_inputs_dict
+
 
     def forward_encoder(self, feat: Tensor, feat_mask: Tensor,
                         feat_pos: Tensor, spatial_shapes: Tensor,
@@ -444,6 +656,7 @@ class PTSEFormer(VideoDetectionTransformer):
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
+
     def gen_encoder_output_proposals(
             self, memory: Tensor, memory_mask: Tensor,
             spatial_shapes: Tensor) -> Tuple[Tensor, Tensor]:
@@ -560,3 +773,18 @@ class PTSEFormer(VideoDetectionTransformer):
             x.append(img_feats[i][[0]])  # 只有第一个是关键帧，关键帧的4个level特征图
             ref_x.append(img_feats[i][1:])  # 参考帧的4个level特征图
         return x, ref_x
+
+    @property
+    def with_neck(self) -> bool:
+        """bool: whether the detector has a neck"""
+        return hasattr(self, 'neck') and self.neck is not None
+
+    @property
+    def with_rpn(self) -> bool:
+        """bool: whether the detector has RPN"""
+        return hasattr(self, 'rpn_head') and self.rpn_head is not None
+
+    @property
+    def with_roi_head(self) -> bool:
+        """bool: whether the detector has a RoI head"""
+        return hasattr(self, 'roi_head') and self.roi_head is not None
