@@ -21,7 +21,7 @@ model = dict(
     test_cfg=dict(key_frame_interval=10))
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=7, val_interval=7)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
@@ -38,14 +38,14 @@ param_scheduler = [
         begin=0,
         end=7,
         by_epoch=True,
-        milestones=[2, 5],
+        milestones=[3, 4],
         gamma=0.1)
 ]
 
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
+    optimizer=dict(type='SGD', lr=0.001/4, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 
 visualizer = dict(type='DetLocalVisualizer')
