@@ -61,34 +61,30 @@ class SelsaAggregator(BaseModule):
             [N, C].
         """
         # 直接在这里打断点，就可以看到最深层的调用关系。
-        roi_n, C = x.shape  # 176*1024
-        ref_roi_n, _ = ref_x.shape  # 373*1024
-        num_c_per_att_block = C // self.num_attention_blocks
+        roi_n, C = x.shape  # roi_n表示roi的数量(如187或256)，C表示维度=1024。
+        ref_roi_n, _ = ref_x.shape  # 600*1024
+        num_c_per_att_block = C // self.num_attention_blocks  # 每个注意力块(共16个)中的特征通道数量(1024/16=24)。
 
-        x_embed = self.fc_embed(x)
-        # [num_attention_blocks, roi_n, C / num_attention_blocks]
-        x_embed = x_embed.view(roi_n, self.num_attention_blocks,
-                               num_c_per_att_block).permute(1, 0, 2)
+        x_embed = self.fc_embed(x)  # 线性变换引入了一组可学习的权重参数，模型可以根据训练数据自动学习出适合任务的特征表示。
+        # [num_attention_blocks=16, roi_n=256, num_c_per_att_block=64]
+        x_embed = x_embed.view(roi_n, self.num_attention_blocks, num_c_per_att_block).permute(1, 0, 2)
 
         ref_x_embed = self.ref_fc_embed(ref_x)
-        # [num_attention_blocks, C / num_attention_blocks, ref_roi_n]
-        ref_x_embed = ref_x_embed.view(ref_roi_n, self.num_attention_blocks,
-                                       num_c_per_att_block).permute(1, 2, 0)
+        ref_x_embed = ref_x_embed.view(ref_roi_n, self.num_attention_blocks, num_c_per_att_block).permute(1, 2, 0)
 
         # 计算输入张量 x_embed 和参考张量 ref_x_embed 之间的自注意力矩阵/余弦相似度矩阵,类似QK/V
-        # bmm表示批量矩阵乘法(Tensor(16,187,64)*(16,64,374)=(16,187,374))，表示16个注意力块，187个roi，374个参考帧roi
+        # bmm表示批量矩阵乘法(Tensor(16,256,64)*(16,64,600)=(16,256,600))，表示16个注意力块，187个roi，374个参考帧roi
         # 除法是为了进行缩放，以确保点积的结果不会因为向量维度较大而过大。这是在实现自注意力机制时常用的技巧。
         weights = torch.bmm(x_embed, ref_x_embed) / (x_embed.shape[-1]**0.5)
         weights = weights.softmax(dim=2)  # 得到一个形状与weights相同的概率分布张量。
 
         ref_x_new = self.ref_fc(ref_x)
         # [num_attention_blocks, ref_roi_n, C / num_attention_blocks]
-        ref_x_new = ref_x_new.view(ref_roi_n, self.num_attention_blocks,
-                                   num_c_per_att_block).permute(1, 0, 2)
+        ref_x_new = ref_x_new.view(ref_roi_n, self.num_attention_blocks,num_c_per_att_block).permute(1, 0, 2)
 
         # [roi_n, num_attention_blocks, C / num_attention_blocks]
         # 用于将注意力权重 weights 和参考特征 ref_x_new 进行加权求和，得到聚合后的特征表示 x_new。
         # 使用 contiguous() 函数将张量变为连续的内存块，以便后续的全连接层操作。
         x_new = torch.bmm(weights, ref_x_new).permute(1, 0, 2).contiguous()
-        x_new = self.fc(x_new.view(roi_n, C))  # (187,1024)
+        x_new = self.fc(x_new.view(roi_n, C))  # (256,1024)
         return x_new

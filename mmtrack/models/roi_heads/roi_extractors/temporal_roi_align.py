@@ -225,4 +225,4 @@ class TemporalRoIAlign(SingleRoIExtractor):
                 temporal_roi_feats = torch.cat((roi_feats, ref_roi_feats),
                                                dim=0)
                 temporal_roi_feats = temporal_roi_feats.mean(dim=0)
-            return temporal_roi_feats
+            return temporal_roi_feats  # tensor(256,512,7,7)

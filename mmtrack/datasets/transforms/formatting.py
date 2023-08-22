@@ -10,7 +10,6 @@ from mmengine.structures import InstanceData
 from mmtrack.registry import TRANSFORMS
 from mmtrack.structures import ReIDDataSample, TrackDataSample
 
-
 @TRANSFORMS.register_module()
 class PackTrackInputs(BaseTransform):
     """Pack the inputs data for the video object detection / multi object
@@ -190,7 +189,7 @@ class PackTrackInputs(BaseTransform):
         for key in self.mapping_table.keys():
             if key not in results:
                 continue
-            if key == 'gt_masks':
+            if key == 'gt_masks':  # 将分割掩码数据进行转换和处理，并存储到相应的数据结构中，以供后续的使用。
                 gt_masks = results[key]
                 gt_masks_ndarray = [
                     mask.to_ndarray() for mask in gt_masks
@@ -219,7 +218,7 @@ class PackTrackInputs(BaseTransform):
                         ref_instance_data[mapped_key] = BitmapMasks(
                             ref_gt_masks, *ref_gt_masks.shape[-2:])
 
-            else:
+            else:  # 处理多种类型的标注信息，包括边界框、标签等，
                 anns = results[key]
                 key_anns, ref_anns = self._cat_same_type_data(anns)
 
@@ -264,7 +263,7 @@ class PackTrackInputs(BaseTransform):
                             'map_instances_to_img_idx'] = to_tensor(
                                 ref_img_idx_map)
 
-        data_sample.gt_instances = instance_data
+        data_sample.gt_instances = instance_data  # 这里就把mask信息给丢了。需要在前面加上
         data_sample.ignored_instances = ignore_instance_data
         setattr(data_sample, f'{self.ref_prefix}_gt_instances',
                 ref_instance_data)

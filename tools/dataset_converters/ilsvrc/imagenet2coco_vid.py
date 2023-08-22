@@ -208,7 +208,9 @@ def convert_vid(VID, ann_dir, save_dir, mode='train'):
                     image_id=records['img_id'],
                     category_id=category_id,
                     instance_id=instance_id,
-                    bbox=[x1, y1, w, h],
+                    bbox=[x1, y1, w, h],  # xy为左上角坐标，wh为宽高。
+                    # boxmask会用到，用来计算mask。每两个是一个坐标。从左上角逆时针回到左上角，是一个回路。
+                    segmentation=[x1, y1, x2, y1, x2, y2, x1, y2, x1, y1],
                     area=w * h,
                     iscrowd=False,
                     occluded=occluded == '1',

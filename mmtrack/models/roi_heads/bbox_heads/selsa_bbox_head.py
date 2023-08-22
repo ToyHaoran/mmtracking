@@ -58,20 +58,19 @@ class SelsaBBoxHead(ConvFCBBoxHead):
                 x = self.avg_pool(x)
                 ref_x = self.avg_pool(ref_x)
 
-            x = x.flatten(1)
-            ref_x = ref_x.flatten(1)
-
+            x = x.flatten(1)  # 从(156,512,7,7)变为(256,25088)。
+            ref_x = ref_x.flatten(1)  # 从(600,512,7,7)变为(600,25088)。
+            # shared_fcs有两层，从25088到1024，然后从1024到1024
             for i, fc in enumerate(self.shared_fcs):
-                x = fc(x)
+                x = fc(x)  # 从25088到1024，降维，避免数据量太大。
                 ref_x = fc(ref_x)
-                # 调用mmtrack.models.aggregators.selsa_aggregator.SelsaAggregator.forward()
                 # 将关键帧和参考帧的特征进行聚合，得到增强后的特征。
-                # 如果想要改的话，自己写一个聚合器，然后替换就行。
                 x = x + self.aggregator[i](x, ref_x)
                 ref_x = self.inplace_false_relu(ref_x)
                 x = self.inplace_false_relu(x)
 
-        # separate branches
+        # 这里得到的x是最终特征，接下来就将其送入检测头进行检测了。
+        # boxmask需要从最终特征入手，但是x被压缩了，形状不对。反正就这两个地方。
         x_cls = x
         x_reg = x
 

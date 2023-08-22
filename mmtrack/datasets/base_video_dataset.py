@@ -367,8 +367,7 @@ class BaseVideoDataset(BaseDataset):
         """
         data_info = self.get_data_info(idx)
         if self.ref_img_sampler is not None:
-            data_infos = self.ref_img_sampling(idx, data_info,
-                                               **self.ref_img_sampler)
+            data_infos = self.ref_img_sampling(idx, data_info, **self.ref_img_sampler)
             for _data in data_infos:
                 if 'video_id' in data_infos[0]:
                     assert data_infos[0]['video_id'] == _data['video_id']
@@ -382,19 +381,21 @@ class BaseVideoDataset(BaseDataset):
             final_data_info['is_video_data'] = self.load_as_video
 
         """findal_data_info的信息
-        三张图片路径(未加载) {'file_name': ['xxx/000249.JPEG',xxx\\000244.JPEG', 'xxx\\000252.JPEG'],
+        三张图片路径(未加载) {'file_name': ['xxx/000249.JPEG',xxx/000244.JPEG', 'xxx/000252.JPEG'],
         第一帧是关键帧(训练帧)，后两帧是参考帧 'is_vid_train_frame': [True, False, False],
         'img_id': [250, 245, 253], 'video_length': [300, 300, 300],...,
         'img_path': ['xxx,xxx,xxx]
-        'instances': [
+        'instances': [  若加了mask，则每两个是一个坐标。从左上角逆时针回到左上角，是一个回路。
+        {'ignore_flag': 0, 'bbox': [0, 62, 352, 253], 'bbox_label': 16, 'mask': [0, 62, 352, 62, 352, 253, 0, 253, 0, 62], 'instance_id': 0}
         [{'ignore_flag': 0, 'bbox': [234, 206, 1068, 394], 'bbox_label': 16, 'instance_id': 1}], 
         [{'ignore_flag': 0, 'bbox': [234, 206, 1070, 387], 'bbox_label': 16, 'instance_id': 1}], 
         [{'ignore_flag': 0, 'bbox': [234, 206, 1070, 394], 'bbox_label': 16, 'instance_id': 1}]], 
         'sample_idx': [12, 12, 12], 'is_video_data': [True, True, True]}
         
-        在mmcv.transforms.wrappers.TransformBroadcaster.transform中将三张图片加载并进行一系列转换。
-        """
-        return self.pipeline(final_data_info)
+        在mmcv.transforms.wrappers.TransformBroadcaster.transform中将三张图片加载并进行一系列转换。"""
+        # 这里的bbox和mask都在instances中
+        result = self.pipeline(final_data_info)  # 经过pipline后有gt_bbox和gt_bbox_label
+        return result
 
     def ref_img_sampling(self,
                          idx: int,

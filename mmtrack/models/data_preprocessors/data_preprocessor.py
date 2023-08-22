@@ -76,8 +76,7 @@ class TrackDataPreprocessor(BaseDataPreprocessor):
             self._enable_normalize = True
             # 将一个一维数组mean=[123.675, 116.28, 103.53]转换成一个四维张量
             self.register_buffer('mean', torch.tensor(mean).view(1, -1, 1, 1), False)
-            self.register_buffer('std',
-                                 torch.tensor(std).view(1, -1, 1, 1), False)
+            self.register_buffer('std', torch.tensor(std).view(1, -1, 1, 1), False)
         else:
             self._enable_normalize = False
 
@@ -155,7 +154,7 @@ class TrackDataPreprocessor(BaseDataPreprocessor):
                 aug_inputs, data_samples = batch_aug(inputs['img'][:, 0],
                                                      data_samples)
                 inputs['img'] = aug_inputs.unsqueeze(1)
-        # 返回处理后的数据如将13,27之类的变为-1.30000,0.00000之类的
+        # 返回处理后的数据，如将13,27之类的变为-1.30000,0.00000之类的
         return dict(inputs=inputs, data_samples=data_samples)
 
     def _get_pad_shape(self, data: dict) -> Dict[str, List]:

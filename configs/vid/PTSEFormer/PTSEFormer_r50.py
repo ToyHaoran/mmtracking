@@ -1,5 +1,5 @@
 _base_ = [
-    # 这里在本机调试，修改为demo数据集，而不是使用VID和DET的混合数据集
+    # Linux调试使用混合数据集，本机调试使用demo数据集。
     '../../_base_/datasets/imagenet_vid_fgfa_style.py',
     '../../_base_/default_runtime.py'
 ]
@@ -50,7 +50,7 @@ model = dict(
         norm_cfg=dict(type='GN', num_groups=32),
         num_outs=4),
     d_encoder=dict(  # DeformableDetrTransformerEncoder
-        num_layers=6,  # 从6改为1 避免爆显存
+        num_layers=6,  # 避免爆显存，可以将6改为1
         layer_cfg=dict(  # DeformableDetrTransformerEncoderLayer
             self_attn_cfg=dict(  # MultiScaleDeformableAttention
                 embed_dims=256,
@@ -74,7 +74,7 @@ model = dict(
                 embed_dims=256, feedforward_channels=1024, ffn_drop=0.1)),
         post_norm_cfg=None),
     positional_encoding=dict(num_feats=128, normalize=True, offset=-0.5),
-    TFAM_num_layers=2,  # 时间特征聚合模块的层数，从2改为1避免爆显存
+    TFAM_num_layers=2,  # 时间特征聚合模块的层数，避免爆显存可以将2改为1
     STAM_num_layers=2,  # 空间转换感知模块的层数
     bbox_head=dict(
         type='DeformableDETRHead',
@@ -107,16 +107,16 @@ val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
 # optimizer
-# optim_wrapper = dict(
-#     type='OptimWrapper',
-#     optimizer=dict(type='AdamW', lr=0.0001, weight_decay=0.0001),
-#     clip_grad=dict(max_norm=0.1, norm_type=2),
-#     paramwise_cfg=dict(custom_keys={'backbone': dict(lr_mult=0.1, decay_mult=1.0)}))
-
 optim_wrapper = dict(
     type='OptimWrapper',
-    optimizer=dict(type='SGD', lr=0.001/4, momentum=0.9, weight_decay=0.0001),
-    clip_grad=dict(max_norm=35, norm_type=2))
+    optimizer=dict(type='AdamW', lr=0.00025, weight_decay=0.0001),
+    clip_grad=dict(max_norm=0.1, norm_type=2),
+    paramwise_cfg=dict(custom_keys={'backbone': dict(lr_mult=0.1, decay_mult=1.0)}))
+
+# optim_wrapper = dict(
+#     type='OptimWrapper',
+#     optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
+#     clip_grad=dict(max_norm=35, norm_type=2))
 
 # learning rate
 param_scheduler = [

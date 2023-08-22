@@ -2,7 +2,7 @@
 from typing import List, Tuple
 
 from mmdet.models import StandardRoIHead
-from mmdet.structures.bbox import bbox2roi
+from mmdet.structures.bbox import bbox2roi, bbox2result
 from torch import Tensor
 
 from mmtrack.registry import MODELS
@@ -59,19 +59,18 @@ class SelsaRoIHead(StandardRoIHead):
                     feats=[lvl_feat[i][None] for lvl_feat in x])
                 sampling_results.append(sampling_result)
 
+        # 此刻的x为(1,512,38,57)
         losses = dict()
         # bbox head forward and loss
         if self.with_bbox:
-            bbox_results = self.bbox_loss(x, ref_x, sampling_results,
-                                          ref_rpn_results_list)
+            bbox_results = self.bbox_loss(x, ref_x, sampling_results, ref_rpn_results_list)
             losses.update(bbox_results['loss_bbox'])
 
-        # mask head forward and loss
+        # mask head forward and loss 实现boxmask论文
         if self.with_mask:
-            mask_results = self.mask_loss(x, sampling_results,
-                                          bbox_results['bbox_feats'],
-                                          batch_gt_instances)
-            losses.update(mask_results['loss_mask'])
+            mask_results = self.mask_loss(x, sampling_results, bbox_results['bbox_feats'], batch_gt_instances)
+            if mask_results['loss_mask'] is not None:
+                losses.update(mask_results['loss_mask'])
 
         return losses
 
@@ -80,12 +79,12 @@ class SelsaRoIHead(StandardRoIHead):
         """Box head forward function used in both training and testing.
 
         Args:
-            x (Tuple[Tensor]): List of multi-level img features.
-            ref_x (Tuple[Tensor]): List of multi-level reference img features.
+            x (Tuple[Tensor]): List of multi-level img features.  如 tensor(1,512,36,63)
+            ref_x (Tuple[Tensor]): List of multi-level reference img features.  如 tensor(2,512,36,63)
             rois (Tensor): RoIs with the shape (n, 5) where the first
-                column indicates batch id of each RoI.
+                column indicates batch id of each RoI.  如 tensor(256,5)
             ref_rois (Tensor): Reference RoIs with the shape (n, 5) where the
-                first column indicates batch id of each RoI.
+                first column indicates batch id of each RoI.  如 tensor(600,5)
 
         Returns:
             dict[str, Tensor]: Usually returns a dictionary with keys:
@@ -96,24 +95,23 @@ class SelsaRoIHead(StandardRoIHead):
         """
 
         # TODO: a more flexible way to decide which feature maps to use
-        # 调用mmdet.models.roi_heads.roi_extractors.single_level_roi_extractor.SingleRoIExtractor.forward()
-        bbox_feats = self.bbox_roi_extractor(
-            x[:self.bbox_roi_extractor.num_inputs],
-            rois,
-            ref_feats=ref_x[:self.bbox_roi_extractor.num_inputs])
+        # SELSA和TROI就这个提取过程不同但是输出格式是一样的。
+        # 即根据框坐标提取对应的特征，输出7*7*512大小的特征图，tensor(256,512,7,7), 256表示提议的数量。
+        bbox_feats = self.bbox_roi_extractor(x[:self.bbox_roi_extractor.num_inputs], rois,
+                                             ref_feats=ref_x[:self.bbox_roi_extractor.num_inputs])
+        # tensor(600,512,7,7)，600表示所有参考帧的提议总数。
+        ref_bbox_feats = self.bbox_roi_extractor(ref_x[:self.bbox_roi_extractor.num_inputs], ref_rois)
 
-        ref_bbox_feats = self.bbox_roi_extractor(
-            ref_x[:self.bbox_roi_extractor.num_inputs], ref_rois)
+        # TODO 按论文中的说法，boxmask应该从这里插入，生成一些预测。然后与loss连接在一起。
+
         if self.with_shared_head:
             bbox_feats = self.shared_head(bbox_feats)
             ref_bbox_feats = self.shared_head(ref_bbox_feats)
 
-        # 调用mmtrack.models.roi_heads.bbox_heads.selsa_bbox_head.SelsaBBoxHead.forward()
-        # 对于关键帧和参考帧的bbox特征进行聚合，内部调用SelsaAggregator
+        # 对于关键帧和参考帧的bbox特征进行聚合，调用 SelsaBBoxHead，内部调用 SelsaAggregator
         cls_score, bbox_pred = self.bbox_head(bbox_feats, ref_bbox_feats)
 
-        bbox_results = dict(
-            cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
+        bbox_results = dict(cls_score=cls_score, bbox_pred=bbox_pred, bbox_feats=bbox_feats)
         return bbox_results
 
     def bbox_loss(self, x: Tuple[Tensor], ref_x: Tuple[Tensor],
@@ -131,8 +129,8 @@ class SelsaRoIHead(StandardRoIHead):
         Returns:
             dict[str, Tensor]: a dictionary of loss components.
         """
-        rois = bbox2roi([res.bboxes for res in sampling_results])
-        ref_rois = bbox2roi([res.bboxes for res in ref_rpn_results_list])
+        rois = bbox2roi([res.bboxes for res in sampling_results])  # bboxes为tensor(256,4)，将边界框转为roi格式为(256,5)
+        ref_rois = bbox2roi([res.bboxes for res in ref_rpn_results_list])  # ref_rois为(600,5)，每个ref有300个。
         bbox_results = self._bbox_forward(x, ref_x, rois, ref_rois)
 
         bbox_loss_and_target = self.bbox_head.loss_and_target(
@@ -195,9 +193,9 @@ class SelsaRoIHead(StandardRoIHead):
             self.test_cfg,
             rescale=rescale)
 
-        if self.with_mask:
-            results_list = self.predict_mask(
-                x, batch_img_metas, results_list, rescale=rescale)
+        # 测试的时候不需要生成mask，只是用来辅助训练。
+        # if self.with_mask:
+        #     results_list = self.predict_mask(x, batch_img_metas, results_list, rescale=rescale)
 
         return results_list
 

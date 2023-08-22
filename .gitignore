@@ -122,3 +122,5 @@ mmtrack/.mim
 *.py~
 *.sh~
 /workdir/
+/configs/vid/PTSEFormer/~$SEFormer调试.docx
+/configs/vid/PTSEFormer/PTSEFormer调试.docx

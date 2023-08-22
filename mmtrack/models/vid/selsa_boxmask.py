@@ -14,7 +14,7 @@ from .base import BaseVideoDetector
 
 
 @MODELS.register_module()
-class SELSA(BaseVideoDetector):
+class SELSA_BOXMASK(BaseVideoDetector):
     """Sequence Level Semantics Aggregation for Video Object Detection.
 
     This video object detector is the implementation of `SELSA

@@ -1,22 +1,24 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from abc import ABCMeta, abstractmethod
+from copy import deepcopy
 from typing import Dict, List, Tuple, Union
 import math
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+from mmdet.models.utils import samplelist_boxtype2tensor
 from mmtrack.registry import MODELS
 from mmtrack.models import BaseVideoDetector
 from mmdet.structures import OptSampleList, SampleList
-
-
 
 from mmcv.cnn.bricks.transformer import MultiScaleDeformableAttention
 
 from mmdet.utils import ConfigType, OptConfigType, OptMultiConfig
 from mmdet.models.layers import (DeformableDetrTransformerDecoder,
                       DeformableDetrTransformerEncoder, SinePositionalEncoding)
+from mmtrack.utils import convert_data_sample_type
+from .decoder import SimpleDecoderV2, OursDecoderV2
 
 
 @MODELS.register_module()
@@ -61,8 +63,8 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
 
                  backbone: ConfigType = None,
                  neck: OptConfigType = None,
-                 encoder: OptConfigType = None,
-                 decoder: OptConfigType = None,
+                 d_encoder: OptConfigType = None,
+                 d_decoder: OptConfigType = None,
                  bbox_head: OptConfigType = None,
 
                  positional_encoding: OptConfigType = None,
@@ -70,10 +72,11 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
                  train_cfg: OptConfigType = None,
                  test_cfg: OptConfigType = None,
                  data_preprocessor: OptConfigType = None,
+                 TFAM_num_layers: int = 2,
+                 STAM_num_layers: int = 2,
                  init_cfg: OptMultiConfig = None) -> None:
 
-        super().__init__(
-            data_preprocessor=data_preprocessor, init_cfg=init_cfg)
+        super().__init__(data_preprocessor=data_preprocessor, init_cfg=init_cfg)
 
         self.with_box_refine = with_box_refine
         self.as_two_stage = as_two_stage
@@ -91,8 +94,8 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
             # And all the prediction layers should share parameters
             # when `with_box_refine` is `True`.
             bbox_head['share_pred_layer'] = not with_box_refine
-            bbox_head['num_pred_layer'] = (decoder['num_layers'] + 1) \
-                if self.as_two_stage else decoder['num_layers']
+            bbox_head['num_pred_layer'] = (d_decoder['num_layers'] + 1) \
+                if self.as_two_stage else d_decoder['num_layers']
             bbox_head['as_two_stage'] = as_two_stage
 
         # process args
@@ -100,40 +103,20 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         bbox_head.update(test_cfg=test_cfg)
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
-        self.encoder = encoder
-        self.decoder = decoder
-        self.positional_encoding = positional_encoding
+
         self.num_queries = num_queries
+        self.embed_dims = 256
 
-        # init model layers
-        self.backbone = MODELS.build(backbone)
-        if neck is not None:
-            self.neck = MODELS.build(neck)
-        self.bbox_head = MODELS.build(bbox_head)
-        self._init_layers()
+        num_feats = positional_encoding.num_feats
+        assert num_feats * 2 == self.embed_dims, \
+            f'embed_dims should be exactly 2 times of num_feats. Found {self.embed_dims} and {num_feats}.'
 
-
-    def _init_layers(self) -> None:
-        """Initialize layers except for backbone, neck and bbox_head."""
-        self.positional_encoding = SinePositionalEncoding(
-            **self.positional_encoding)
-        self.encoder = DeformableDetrTransformerEncoder(**self.encoder)
-        self.decoder = DeformableDetrTransformerDecoder(**self.decoder)
-        self.embed_dims = self.encoder.embed_dims
         if not self.as_two_stage:
-            self.query_embedding = nn.Embedding(self.num_queries,
-                                                self.embed_dims * 2)
+            self.query_embedding = nn.Embedding(self.num_queries, self.embed_dims * 2)
             # NOTE The query_embedding will be split into query and query_pos
             # in self.pre_decoder, hence, the embed_dims are doubled.
 
-        num_feats = self.positional_encoding.num_feats
-        assert num_feats * 2 == self.embed_dims, \
-            'embed_dims should be exactly 2 times of num_feats. ' \
-            f'Found {self.embed_dims} and {num_feats}.'
-
-        self.level_embed = nn.Parameter(
-            torch.Tensor(self.num_feature_levels, self.embed_dims))
-
+        self.level_embed = nn.Parameter(torch.Tensor(self.num_feature_levels, self.embed_dims))
         if self.as_two_stage:
             self.memory_trans_fc = nn.Linear(self.embed_dims, self.embed_dims)
             self.memory_trans_norm = nn.LayerNorm(self.embed_dims)
@@ -142,6 +125,22 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
             self.pos_trans_norm = nn.LayerNorm(self.embed_dims * 2)
         else:
             self.reference_points_fc = nn.Linear(self.embed_dims, 2)
+
+        # 初始化 backbone, neck and bbox_head
+        self.backbone = MODELS.build(backbone)
+        if neck is not None:
+            self.neck = MODELS.build(neck)
+        self.bbox_head = MODELS.build(bbox_head)
+
+        # 初始化位置编码、DeformableDETR
+        self.positional_encoding = SinePositionalEncoding(**positional_encoding)
+        self.d_encoder = DeformableDetrTransformerEncoder(**d_encoder)  # DeformableTransformerEncoder
+        self.d_decoder = DeformableDetrTransformerDecoder(**d_decoder)  # DeformableTransformerDecoder
+        self.TFAM = SimpleDecoderV2(num_layers=TFAM_num_layers)  # 黄色块 时间特征聚合模块
+        self.STAM = OursDecoderV2(num_layers=STAM_num_layers)  # 绿色块 空间转换感知模块
+        self.QAM = nn.Linear(self.embed_dims, self.embed_dims * 2)
+        nn.init.constant_(self.QAM.bias, 0)
+
 
     def loss(self, inputs: Tensor,
              data_samples: SampleList) -> Union[dict, list]:
@@ -161,12 +160,12 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         Returns:
             dict: A dictionary of loss components
         """
+        # 对视频数据集进行处理，将关键帧和参考帧放在一起。
         img = inputs['img']  # 关键帧 Tensor:(bs=1,1,3,608,800) T=1表示1个关键帧
         assert img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
         assert img.size(0) == 1, 'video detectors only support 1 batch size per gpu for now.'
         assert img.size(1) == 1, 'video detector only has 1 key image per batch.'
         img = img[0]
-
         ref_img = inputs['ref_img']  # 参考帧 Tensor:(1,2,3,608,800) T=2表示2个参考帧
         assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
         assert ref_img.size(0) == 1, 'video detectors only support 1 batch size per gpu for now.'
@@ -179,7 +178,7 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         # 把关键帧和参考帧放在一起提取特征：经过backbone(ResNet)，经过neck(ChannelMapper)，提取特征。后面在pre_transformer会分开处理。
         img_feats = self.extract_feat(all_imgs)  # 4个level的Tensor:(3,256,38,50)
 
-        # 进入transformer流程：'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'
+        # 进入PTSEFormer流程：直接在这里面全部运行了，不调来调去了。
         head_inputs_dict = self.forward_transformer(img_feats, data_samples)
 
         # 计算loss
@@ -188,19 +187,25 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         return losses
 
     def predict(self,
-                batch_inputs: Tensor,
-                batch_data_samples: SampleList,
+                inputs: Tensor,
+                data_samples: SampleList,
                 rescale: bool = True) -> SampleList:
         """Predict results from a batch of inputs and data samples with post-
         processing.
 
         Args:
-            batch_inputs (Tensor): Inputs, has shape (bs, dim, H, W).
-            batch_data_samples (List[:obj:`DetDataSample`]): The batch
+            inputs (dict[Tensor]): of shape (N, T, C, H, W) encoding
+                input images. Typically these should be mean centered and std
+                scaled. The N denotes batch size and must be 1 in SELSA method.
+                The T denotes the number of key/reference frames.
+                - img (Tensor) : The key images.
+                - ref_img (Tensor, Optional): The reference images.
+            data_samples (list[:obj:`TrackDataSample`]): The batch
                 data samples. It usually includes information such
-                as `gt_instance` or `gt_panoptic_seg` or `gt_sem_seg`.
-            rescale (bool): Whether to rescale the results.
-                Defaults to True.
+                as `gt_instance`.
+            rescale (bool, Optional): If False, then returned bboxes and masks
+                will fit the scale of img, otherwise, returned bboxes and masks
+                will fit the scale of original image shape. Defaults to True.
 
         Returns:
             list[:obj:`DetDataSample`]: Detection results of the input images.
@@ -214,21 +219,40 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
             - bboxes (Tensor): Has a shape (num_instances, 4),
               the last dimension 4 arrange as (x1, y1, x2, y2).
         """
-        img_feats = self.extract_feat(batch_inputs)
-        head_inputs_dict = self.forward_transformer(img_feats,
-                                                    batch_data_samples)
+        img = inputs['img']
+        assert img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
+        assert img.size(0) == 1, 'video detectors only support 1 batch size per gpu for now.'
+        assert img.size(1) == 1, 'video detector only has 1 key image per batch.'
+        img = img[0]
+
+        assert len(data_samples) == 1, 'detectors only support 1 batch size per gpu for now.'
+
+        if 'ref_img' in inputs:
+            ref_img = inputs['ref_img']
+            assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
+            assert ref_img.size(0) == 1, ' video detectors only support 1 batch size per gpu for now.'
+            ref_img = ref_img[0]
+            all_imgs = torch.cat((img, ref_img), dim=0)  # 把关键帧和参考帧 0维连接 Tensor:(T=3,C=3,H=608,W=800)、
+        else:
+            ref_img = None
+            all_imgs = img
+
+        img_feats = self.extract_feat(all_imgs)
+        head_inputs_dict = self.forward_transformer(img_feats, data_samples)
         results_list = self.bbox_head.predict(
             **head_inputs_dict,
             rescale=rescale,
-            batch_data_samples=batch_data_samples)
-        batch_data_samples = self.add_pred_to_datasample(
-            batch_data_samples, results_list)
-        return batch_data_samples
+            batch_data_samples=data_samples)
+        for data_sample, pred_instances in zip(data_samples, results_list):
+            data_sample.pred_det_instances = pred_instances
+        samplelist_boxtype2tensor(data_samples)
+        return data_samples
+
 
     def _forward(
             self,
-            batch_inputs: Tensor,
-            batch_data_samples: OptSampleList = None) -> Tuple[List[Tensor]]:
+            inputs: Tensor,
+            data_samples: OptSampleList = None) -> Tuple[List[Tensor]]:
         """Network forward process. Usually includes backbone, neck and head
         forward without any post-processing.
 
@@ -242,71 +266,25 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         Returns:
             tuple[Tensor]: A tuple of features from ``bbox_head`` forward.
         """
-        img_feats = self.extract_feat(batch_inputs)
-        head_inputs_dict = self.forward_transformer(img_feats,
-                                                    batch_data_samples)
+        # 对视频数据集进行处理，将关键帧和参考帧放在一起。
+        img = inputs['img']  # 关键帧 Tensor:(bs=1,1,3,608,800) T=1表示1个关键帧
+        assert img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
+        assert img.size(0) == 1, 'video detectors only support 1 batch size per gpu for now.'
+        assert img.size(1) == 1, 'video detector only has 1 key image per batch.'
+        img = img[0]
+        ref_img = inputs['ref_img']  # 参考帧 Tensor:(1,2,3,608,800) T=2表示2个参考帧
+        assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
+        assert ref_img.size(0) == 1, 'video detectors only support 1 batch size per gpu for now.'
+        ref_img = ref_img[0]
+
+        assert len(data_samples) == 1, 'video detectors only support 1 batch size per gpu for now.'
+
+        all_imgs = torch.cat((img, ref_img), dim=0)  # 把关键帧和参考帧 0维连接 Tensor:(T=3,C=3,H=608,W=800)、
+
+        img_feats = self.extract_feat(all_imgs)
+        head_inputs_dict = self.forward_transformer(img_feats, data_samples)
         results = self.bbox_head.forward(**head_inputs_dict)
         return results
-
-    def forward_transformer(self,
-                            img_feats: Tuple[Tensor],
-                            batch_data_samples: OptSampleList = None) -> Dict:
-        """Forward process of Transformer, which includes four steps:
-        'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'. We
-        summarized the parameters flow of the existing DETR-like detector,
-        which can be illustrated as follow:
-
-        .. code:: text
-
-                 img_feats & batch_data_samples
-                               |
-                               V
-                      +-----------------+
-                      | pre_transformer |
-                      +-----------------+
-                          |          |
-                          |          V
-                          |    +-----------------+
-                          |    | forward_encoder |
-                          |    +-----------------+
-                          |             |
-                          |             V
-                          |     +---------------+
-                          |     |  pre_decoder  |
-                          |     +---------------+
-                          |         |       |
-                          V         V       |
-                      +-----------------+   |
-                      | forward_decoder |   |
-                      +-----------------+   |
-                                |           |
-                                V           V
-                               head_inputs_dict
-
-        Args:
-            img_feats (tuple[Tensor]): Tuple of feature maps from neck. Each
-                    feature map has shape (bs, dim, H, W).
-            batch_data_samples (list[:obj:`DetDataSample`], optional): The
-                batch data samples. It usually includes information such
-                as `gt_instance` or `gt_panoptic_seg` or `gt_sem_seg`.
-                Defaults to None.
-
-        Returns:
-            dict: The dictionary of bbox_head function inputs, which always
-            includes the `hidden_states` of the decoder output and may contain
-            `references` including the initial and intermediate references.
-        """
-        encoder_inputs_dict, decoder_inputs_dict = self.pre_transformer(
-            img_feats, batch_data_samples)
-
-        encoder_outputs_dict = self.forward_encoder(**encoder_inputs_dict)
-
-        tmp_dec_in, head_inputs_dict = self.pre_decoder(**encoder_outputs_dict)
-        decoder_inputs_dict.update(tmp_dec_in)
-
-        decoder_outputs_dict = self.forward_decoder(**decoder_inputs_dict)
-        head_inputs_dict.update(decoder_outputs_dict)
-        return head_inputs_dict
 
     def extract_feat(self, batch_inputs: Tensor) -> Tuple[Tensor]:
         """Extract features.
@@ -323,49 +301,25 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
             x = self.neck(x)
         return x
 
-    def pre_transformer(
-            self,
-            mlvl_feats: Tuple[Tensor],
-            batch_data_samples: OptSampleList = None) -> Tuple[Dict]:
-        """Process image features before feeding them to the transformer.
+    def forward_transformer(self,
+                            img_feats: Tuple[Tensor],
+                            batch_data_samples: OptSampleList = None) -> Dict:
 
-        The forward procedure of the transformer is defined as:
-        'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'
-        More details can be found at `TransformerDetector.forward_transformer`
-        in `mmdet/detector/base_detr.py`.
-
-        Args:
-            mlvl_feats (tuple[Tensor]): Multi-level features that may have
-                different resolutions, output from neck. Each feature has
-                shape (bs, dim, h_lvl, w_lvl), where 'lvl' means 'layer'. lvl尺度不等于num_layer。
-                多尺度特征图，区别detr，这里有lavel=4个Tensor，shape为(bs, dim, h_lvl, w_lvl)
-            batch_data_samples (list[:obj:`DetDataSample`], optional): The
-                batch data samples. It usually includes information such
-                as `gt_instance` or `gt_panoptic_seg` or `gt_sem_seg`.
-                Defaults to None.
-
-        Returns:
-            tuple[dict]: The first dict contains the inputs of encoder and the
-            second dict contains the inputs of decoder.
-
-            - encoder_inputs_dict (dict): The keyword args dictionary of
-              `self.forward_encoder()`, which includes 'feat', 'feat_mask',
-              and 'feat_pos'.
-            - decoder_inputs_dict (dict): The keyword args dictionary of
-              `self.forward_decoder()`, which includes 'memory_mask'.
-        """
-
+        # ======1st stage---最左侧的梯形淡蓝色框--经过DeformableDETR
+        mlvl_feats = img_feats
         batch_size = mlvl_feats[0].size(0)  # 注意这里的batch_size只有第一个是关键帧，剩下的是参考帧。
 
         # construct binary masks for the transformer.
         # assert batch_data_samples is not None
-        assert len(batch_data_samples) is 1  # batch_data_samples就一个元素
+        assert len(batch_data_samples) == 1  # batch_data_samples就一个元素
         batch_input_shape = batch_data_samples[0].batch_input_shape
 
         # img_shape_list = [sample.img_shape for sample in batch_data_samples]  # 改一下，取得每张图片的实际shape
         key_img_shape = batch_data_samples[0].get("img_shape")
         ref_img_shape = batch_data_samples[0].get("ref_img_shape")
         img_shape_list = [key_img_shape, *ref_img_shape]
+        if isinstance(ref_img_shape, Tuple):  # (demo数据集样本太少导致只有一个参考帧)
+            img_shape_list = [key_img_shape, ref_img_shape]
 
         input_img_h, input_img_w = batch_input_shape
         masks = mlvl_feats[0].new_ones((batch_size, input_img_h, input_img_w))
@@ -378,17 +332,14 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         mlvl_masks = []  # 多尺度特征图对应的mask，每个mask的shape为[bs, H_feat, W_feat]
         mlvl_pos_embeds = []  # 多尺度特征图对应的位置编码，每个位置编码对应的shape为[bs, 256, H_feat, W_feat]
         for feat in mlvl_feats:
-            mlvl_masks.append(
-                F.interpolate(masks[None],
-                              size=feat.shape[-2:]).to(torch.bool).squeeze(0))
+            mlvl_masks.append(F.interpolate(masks[None], size=feat.shape[-2:]).to(torch.bool).squeeze(0))
             mlvl_pos_embeds.append(self.positional_encoding(mlvl_masks[-1]))
 
         feat_flatten = []
         lvl_pos_embed_flatten = []
         mask_flatten = []
         spatial_shapes = []
-        for lvl, (feat, mask, pos_embed) in enumerate(
-                zip(mlvl_feats, mlvl_masks, mlvl_pos_embeds)):
+        for lvl, (feat, mask, pos_embed) in enumerate(zip(mlvl_feats, mlvl_masks, mlvl_pos_embeds)):
             batch_size, c, h, w = feat.shape
             # [bs, c, h_lvl, w_lvl] -> [bs, h_lvl*w_lvl, c]  即长宽相乘，得到特征点数量。
             feat = feat.view(batch_size, c, -1).permute(0, 2, 1)
@@ -414,196 +365,123 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
             dtype=torch.long,
             device=feat_flatten.device)
         level_start_index = torch.cat((
-            spatial_shapes.new_zeros((1, )),  # (num_level)
+            spatial_shapes.new_zeros((1,)),  # (num_level)
             spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack(  # (bs, num_level, 2)
             [self.get_valid_ratio(m) for m in mlvl_masks], 1)
 
-        encoder_inputs_dict = dict(  # 详见DeformableDetrTransformerEncoder.forward
-            feat=feat_flatten,  # 输入query，是碾平后的多尺度特征图[bs, num_feat_points, 256]，自注意力中K V是由Q算出来的。
-            feat_mask=mask_flatten,  # 特征图的有效padding mask [bs, num_feat_points]
-            feat_pos=lvl_pos_embed_flatten,  # 输入query的位置编码[bs, num_feat_points, 256]
+        # 调用DeformableDetrTransformerEncoder，对特征进行编码
+        memory = self.d_encoder(
+            query=feat_flatten,  # 输入query，是碾平后的多尺度特征图[bs, num_feat_points, 256]，自注意力中K V是由Q算出来的。
+            query_pos=lvl_pos_embed_flatten,  # 输入query的位置编码[bs, num_feat_points, 256]
+            key_padding_mask=mask_flatten,  # for self_attn # 特征图的有效padding mask [bs, num_feat_points]
             spatial_shapes=spatial_shapes,  # 每层level/scale特征的w,h的列表 [num_levels, bs]
             level_start_index=level_start_index,  # 每层特征图碾平后的第一个元素的位置索引[num_levels]
-            valid_ratios=valid_ratios)   # 每层特征图对应的mask中有效的宽高比 [bs, num_levels, 2]
-        decoder_inputs_dict = dict(
-            memory_mask=mask_flatten,
-            spatial_shapes=spatial_shapes,
-            level_start_index=level_start_index,
-            valid_ratios=valid_ratios)
-        return encoder_inputs_dict, decoder_inputs_dict
+            valid_ratios=valid_ratios)  # 每层特征图对应的mask中有效的宽高比 [bs, num_levels, 2]
 
+        # 将encoder之后的特征还原回未碾平的状态，4个level，每个Tensor为(3,h*w,256)
+        memory_level_list = []
+        mask_level_list = []
+        for i in range(len(level_start_index) - 1):
+            memory_l = memory[:, level_start_index[i]:level_start_index[i + 1], :]
+            memory_level_list.append(memory_l)
+            mask_l = mask_flatten[:, level_start_index[i]:level_start_index[i + 1]]
+            mask_level_list.append(mask_l)
+        memory_level_list.append(memory[:, level_start_index[-1]:, :])
+        mask_level_list.append(mask_flatten[:, level_start_index[-1]:])
 
-    def forward_encoder(self, feat: Tensor, feat_mask: Tensor,
-                        feat_pos: Tensor, spatial_shapes: Tensor,
-                        level_start_index: Tensor,
-                        valid_ratios: Tensor) -> Dict:
-        """Forward with Transformer encoder.
+        # 将当前帧和参考帧的feature/memory、mask分离，得到M_t和M_t+i
+        mem_cur_stg1, mem_ref_stg1_list = self.separate_cur_and_ref_frames(memory_level_list)
+        mask_cur_stg1, mask_ref_stg1_list = self.separate_cur_and_ref_frames(mask_level_list)
 
-        The forward procedure of the transformer is defined as:
-        'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'
-        More details can be found at `TransformerDetector.forward_transformer`
-        in `mmdet/detector/base_detr.py`.
+        # ======2nd stage=========中间的黄色块和绿色块==================================
+        # 中间下方的绿色块，产生一堆f_t
+        mem_ref_stg2_list = []
+        for mem_ref, mask_ref in zip(mem_ref_stg1_list, mask_ref_stg1_list):  # 遍历两个参考帧
+            mem_ref_stg2_level_list = []
+            for mem_ref_level, mask_ref_level, mem_cur_level, mask_cur_level in \
+                    zip(mem_ref, mask_ref, mem_cur_stg1, mask_cur_stg1):  # 对参考帧的每个level进行遍历
+                # 参考帧的特征M_t+i作为Q，当前帧的特征M_t作为KV输入STAM。
+                mem_ref_stg2 = self.STAM(tgt=mem_ref_level, memory=mem_cur_level).squeeze(0)
+                mem_ref_stg2_level_list.append(mem_ref_stg2)
+            mem_ref_stg2_list.append(mem_ref_stg2_level_list)
 
-        Args:
-            feat (Tensor): Sequential features, has shape (bs, num_feat_points,
-                dim).
-            feat_mask (Tensor): ByteTensor, the padding mask of the features,
-                has shape (bs, num_feat_points).
-            feat_pos (Tensor): The positional embeddings of the features, has
-                shape (bs, num_feat_points, dim).
-            spatial_shapes (Tensor): Spatial shapes of features in all levels,
-                has shape (num_levels, 2), last dimension represents (h, w).
-            level_start_index (Tensor): The start index of each level.
-                A tensor has shape (num_levels, ) and can be represented
-                as [0, h_0*w_0, h_0*w_0+h_1*w_1, ...].
-            valid_ratios (Tensor): The ratios of the valid width and the valid
-                height relative to the width and the height of features in all
-                levels, has shape (bs, num_levels, 2).
+        # ======中间上方的黄色块，即第一个黄色块。产生h_t。
+        # BUG: 源代码把参考帧的特征和mask汇总cat到一起，但是会导致QKV维度不一致。
+        # 创新点：修改为关键帧与每个参考帧分别进行注意力机制。
+        # 遍历并用每个参考帧增强关键帧的特征，mask没有用到(删掉)
+        mem_cur_stg2 = mem_cur_stg1
+        num_level = len(mem_cur_stg1)  # 判断level数
+        for mem_ref_stg1 in mem_ref_stg1_list:
+            for mem_ref_level, mem_cur_level in zip(mem_ref_stg1, mem_cur_stg2):
+                # 当前帧特征M_t作为Q，参考帧特征M_t+i作为KV输入TFAM模块。注意 seq_len必须相同，否则出错。
+                mem_cur_stg2_level = self.TFAM(tgt=mem_cur_level, memory=mem_ref_level).squeeze(0)
+                mem_cur_stg2.append(mem_cur_stg2_level)
+            mem_cur_stg2 = mem_cur_stg2[-num_level:]  # 取增强后的特征
 
-        Returns:
-            dict: The dictionary of encoder outputs, which includes the
-            `memory` of the encoder output.
-        """
-        memory = self.encoder(  # 调用DeformableDetrTransformerEncoder
-            query=feat,
-            query_pos=feat_pos,
-            key_padding_mask=feat_mask,  # for self_attn
-            spatial_shapes=spatial_shapes,
-            level_start_index=level_start_index,
-            valid_ratios=valid_ratios)
-        encoder_outputs_dict = dict(
-            memory=memory,  # encoder的输出，经过自注意力后的多尺度特征图，如[bs=2, num_feat_points=19947, dim=256]
-            memory_mask=feat_mask,
-            spatial_shapes=spatial_shapes)
-        return encoder_outputs_dict
+        # ======3rd stage----右侧第1个黄色块，即上边最右边那个--------------------------------
+        # mem_cur_stg2表示第二阶段产生的h_t, mem_ref_stg2_list表示第二阶段产生的一些f_t
+        mem_cur_stg3 = mem_cur_stg2
+        for mem_ref_stg2 in mem_ref_stg2_list:
+            for mem_cur_level, mem_ref_level in zip(mem_cur_stg3, mem_ref_stg2):
+                mem_final_level = self.TFAM(tgt=mem_cur_level, memory=mem_ref_level).squeeze(0)
+                mem_cur_stg3.append(mem_final_level)
+            mem_cur_stg3 = mem_cur_stg3[-num_level:]  # 取增强后的特征
 
-    def pre_decoder(self, memory: Tensor, memory_mask: Tensor,
-                    spatial_shapes: Tensor) -> Tuple[Dict, Dict]:
-        """Prepare intermediate variables before entering Transformer decoder,
-        such as `query`, `query_pos`, and `reference_points`.
+        # ======4th stage----右侧第2个绿色块--------------------------------
+        # mem_cur_stg1表示第一阶段的M_t，mem_cur_stg3表示第三阶段的E_t。
+        mem_cur_stg4 = []
+        for mem_ref, mem_cur in zip(mem_cur_stg3, mem_cur_stg1):
+            mem_level = self.STAM(tgt=mem_ref, memory=mem_cur, memory_mask=None).squeeze(0)
+            mem_cur_stg4.append(mem_level)
 
-        The forward procedure of the transformer is defined as:
-        'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'
-        More details can be found at `TransformerDetector.forward_transformer`
-        in `mmdet/detector/base_detr.py`.
+        mem_cur_stg4_cat = torch.cat(mem_cur_stg4, dim=1)
 
-        Args:
-            memory (Tensor): The output embeddings of the Transformer encoder,
-                has shape (bs, num_feat_points, dim).
-            memory_mask (Tensor): ByteTensor, the padding mask of the memory,
-                has shape (bs, num_feat_points). It will only be used when
-                `as_two_stage` is `True`.
-            spatial_shapes (Tensor): Spatial shapes of features in all levels,
-                has shape (num_levels, 2), last dimension represents (h, w).
-                It will only be used when `as_two_stage` is `True`.
+        # ======5th stage--------QAM块，用来聚合查询----------------------------
+        query_embeds = self.query_embedding.weight
+        query_ref_list = []
+        for i, mem_ref in enumerate(mem_ref_stg1_list):
+            mem_ref_cat = torch.cat(mem_ref, dim=1)
+            outputs_dict, _ = self.pre_and_decoder(
+                mem_ref_cat,
+                query_embeds,
+                (spatial_shapes, level_start_index, valid_ratios[[i+1]], mask_flatten[[i+1]]))
+            hs = outputs_dict.get("hidden_states")
+            query_ref = self.QAM(hs[-1])  # SD块
+            query_ref_list.append(query_ref)
 
-        Returns:
-            tuple[dict, dict]: The decoder_inputs_dict and head_inputs_dict.
+        bs, _, _ = mem_cur_stg4_cat.shape
+        query_embed = query_embeds.expand(bs, -1, -1)
+        query_ref_cat = torch.cat(query_ref_list, dim=1)
+        query_mix = torch.cat((query_embed, query_ref_cat), dim=1)
+        query_mix = torch.squeeze(query_mix, dim=0)
 
-            - decoder_inputs_dict (dict): The keyword dictionary args of
-              `self.forward_decoder()`, which includes 'query', 'query_pos',
-              'memory', and `reference_points`. The reference_points of
-              decoder input here are 4D boxes when `as_two_stage` is `True`,
-              otherwise 2D points, although it has `points` in its name.
-              The reference_points in encoder is always 2D points.
-            - head_inputs_dict (dict): The keyword dictionary args of the
-              bbox_head functions, which includes `enc_outputs_class` and
-              `enc_outputs_coord`. They are both `None` when 'as_two_stage'
-              is `False`. The dict is empty when `self.training` is `False`.
-        """
+        # ======final stage--淡蓝色块----------------------------------
+        decoder_outputs_dict, head_inputs_dict = self.pre_and_decoder(
+            mem_cur_stg4_cat,
+            query_mix,
+            (spatial_shapes, level_start_index, valid_ratios[[0]], mask_flatten[[0]]))
+        head_inputs_dict.update(decoder_outputs_dict)
+        return head_inputs_dict
+
+    def pre_and_decoder(self, memory: Tensor, query_embed: Tensor, dec_utils: Tuple):
+        # 准备decoder的输入，详见DeformableDETR.pre_decoder
+        # memory经过自注意力后的多尺度特征图，如[bs=2, num_feat_points=19947, dim=256]
+        spatial_shapes, level_start_index, valid_ratios, mask_flatten = dec_utils
         batch_size, _, c = memory.shape
-        if self.as_two_stage:
-            output_memory, output_proposals = \
-                self.gen_encoder_output_proposals(
-                    memory, memory_mask, spatial_shapes)
-            enc_outputs_class = self.bbox_head.cls_branches[
-                self.decoder.num_layers](
-                    output_memory)
-            enc_outputs_coord_unact = self.bbox_head.reg_branches[
-                self.decoder.num_layers](output_memory) + output_proposals
-            enc_outputs_coord = enc_outputs_coord_unact.sigmoid()
-            # We only use the first channel in enc_outputs_class as foreground,
-            # the other (num_classes - 1) channels are actually not used.
-            # Its targets are set to be 0s, which indicates the first
-            # class (foreground) because we use [0, num_classes - 1] to
-            # indicate class labels, background class is indicated by
-            # num_classes (similar convention in RPN).
-            # See https://github.com/open-mmlab/mmdetection/blob/master/mmdet/models/dense_heads/deformable_detr_head.py#L241 # noqa
-            # This follows the official implementation of Deformable DETR.
-            topk_proposals = torch.topk(
-                enc_outputs_class[..., 0], self.num_queries, dim=1)[1]
-            topk_coords_unact = torch.gather(
-                enc_outputs_coord_unact, 1,
-                topk_proposals.unsqueeze(-1).repeat(1, 1, 4))
-            topk_coords_unact = topk_coords_unact.detach()
-            reference_points = topk_coords_unact.sigmoid()
-            pos_trans_out = self.pos_trans_fc(
-                self.get_proposal_pos_embed(topk_coords_unact))
-            pos_trans_out = self.pos_trans_norm(pos_trans_out)
-            query_pos, query = torch.split(pos_trans_out, c, dim=2)
-        else:
-            enc_outputs_class, enc_outputs_coord = None, None
-            query_embed = self.query_embedding.weight
-            query_pos, query = torch.split(query_embed, c, dim=1)
-            query_pos = query_pos.unsqueeze(0).expand(batch_size, -1, -1)
-            query = query.unsqueeze(0).expand(batch_size, -1, -1)
-            reference_points = self.reference_points_fc(query_pos).sigmoid()
+        enc_outputs_class, enc_outputs_coord = None, None
+        # query_embed = self.query_embedding.weight
+        query_pos, query = torch.split(query_embed, c, dim=1)
+        query_pos = query_pos.unsqueeze(0).expand(batch_size, -1, -1)
+        query = query.unsqueeze(0).expand(batch_size, -1, -1)
+        reference_points = self.reference_points_fc(query_pos).sigmoid()
 
-        decoder_inputs_dict = dict(
-            query=query,
-            query_pos=query_pos,
-            memory=memory,
-            reference_points=reference_points)
-        head_inputs_dict = dict(
-            enc_outputs_class=enc_outputs_class,
-            enc_outputs_coord=enc_outputs_coord) if self.training else dict()
-        return decoder_inputs_dict, head_inputs_dict
-
-    def forward_decoder(self, query: Tensor, query_pos: Tensor, memory: Tensor,
-                        memory_mask: Tensor, reference_points: Tensor,
-                        spatial_shapes: Tensor, level_start_index: Tensor,
-                        valid_ratios: Tensor) -> Dict:
-        """Forward with Transformer decoder.
-
-        The forward procedure of the transformer is defined as:
-        'pre_transformer' -> 'encoder' -> 'pre_decoder' -> 'decoder'
-        More details can be found at `TransformerDetector.forward_transformer`
-        in `mmdet/detector/base_detr.py`.
-
-        Args:
-            query (Tensor): The queries of decoder inputs, has shape
-                (bs, num_queries, dim).
-            query_pos (Tensor): The positional queries of decoder inputs,
-                has shape (bs, num_queries, dim).
-            memory (Tensor): The output embeddings of the Transformer encoder,
-                has shape (bs, num_feat_points, dim).
-            memory_mask (Tensor): ByteTensor, the padding mask of the memory,
-                has shape (bs, num_feat_points).
-            reference_points (Tensor): The initial reference, has shape
-                (bs, num_queries, 4) with the last dimension arranged as
-                (cx, cy, w, h) when `as_two_stage` is `True`, otherwise has
-                shape (bs, num_queries, 2) with the last dimension arranged as
-                (cx, cy).
-            spatial_shapes (Tensor): Spatial shapes of features in all levels,
-                has shape (num_levels, 2), last dimension represents (h, w).
-            level_start_index (Tensor): The start index of each level.
-                A tensor has shape (num_levels, ) and can be represented
-                as [0, h_0*w_0, h_0*w_0+h_1*w_1, ...].
-            valid_ratios (Tensor): The ratios of the valid width and the valid
-                height relative to the width and the height of features in all
-                levels, has shape (bs, num_levels, 2).
-
-        Returns:
-            dict: The dictionary of decoder outputs, which includes the
-            `hidden_states` of the decoder output and `references` including
-            the initial and intermediate reference_points.
-        """
-        inter_states, inter_references = self.decoder(  # 调用DeformableDetrTransformerDecoder
+        # 进入decoder，详见DeformableDETR.forward_decoder
+        inter_states, inter_references = self.d_decoder(
             query=query,  # (2,100,256)
             value=memory,  # 经过encoder输出的特征图，作为V输入corss attention
             query_pos=query_pos,
-            key_padding_mask=memory_mask,  # for cross_attn
+            key_padding_mask=mask_flatten,  # for cross_attn
             reference_points=reference_points,
             spatial_shapes=spatial_shapes,
             level_start_index=level_start_index,
@@ -613,9 +491,13 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         # inter_states: 经过交叉注意力并包含每一层decoder输出的object query，shape为[num_layer=6, bs=2, num_query=100, dim=256]
         # inter_references: 每一层layer的reference point，shape为[num_layer=6, bs=2, num_query=100, 2]
         references = [reference_points, *inter_references]  # 保存最初的和中间参考点=1+num_layer=7个元素
-        decoder_outputs_dict = dict(
-            hidden_states=inter_states, references=references)
-        return decoder_outputs_dict
+        decoder_outputs_dict = dict(hidden_states=inter_states, references=references)
+
+        head_inputs_dict = dict(
+            enc_outputs_class=enc_outputs_class,
+            enc_outputs_coord=enc_outputs_coord) if self.training else dict()
+
+        return decoder_outputs_dict, head_inputs_dict
 
     @staticmethod
     def get_valid_ratio(mask: Tensor) -> Tensor:
@@ -759,7 +641,7 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
                           dim=4).flatten(2)
         return pos
 
-    def separate_keyframes_and_reference_frames(self, img_feats):
+    def separate_cur_and_ref_frames(self, img_feats):
         """
         因为是放在一起进行提取特征和处理的，所以要分离关键帧和参考帧。
         Args:
@@ -768,10 +650,13 @@ class PTSEFormer(BaseVideoDetector, metaclass=ABCMeta):
         Returns: Tuple(关键帧x, 参考帧ref_x)
         """
         x = []
-        ref_x = []  # 就是把关键帧和参考帧一起提取的特征分开
-        for i in range(len(img_feats)):
+        num_ref = img_feats[0].shape[0]-1
+        # ref_x = [[]]*num_ref  # 错误：列表中的元素都指向同一个空列表对象，因此当你访问ref[1]时，它实际上引用的是同一个空列表。
+        ref_x = [[] for _ in range(num_ref)]  # 正确：独立的空列表
+        for i in range(len(img_feats)):  # 4个level，循环4次
             x.append(img_feats[i][[0]])  # 只有第一个是关键帧，关键帧的4个level特征图
-            ref_x.append(img_feats[i][1:])  # 参考帧的4个level特征图
+            for j in range(1, num_ref+1):
+                ref_x[j-1].append(img_feats[i][[j]])  # 剩下的是参考帧，参考帧的4个level特征图
         return x, ref_x
 
     @property

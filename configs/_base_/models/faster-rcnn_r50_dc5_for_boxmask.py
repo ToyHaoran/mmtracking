@@ -108,6 +108,7 @@ model = dict(
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
                     add_gt_as_proposals=True),
+                mask_size=28,  # 为了boxmask修改了一部分，论文中mask分支生成的大小。
                 pos_weight=-1,
                 debug=False)),
         test_cfg=dict(
@@ -119,7 +120,8 @@ model = dict(
             rcnn=dict(
                 score_thr=0.0001,
                 nms=dict(type='nms', iou_threshold=0.5),
-                max_per_img=100))
+                max_per_img=100,
+                mask_thr_binary=0.5))  # 相比SELSA增加的部分
         # soft-nms is also supported for rcnn testing
         # e.g., nms=dict(type='soft_nms', iou_threshold=0.5, min_score=0.05)
     ))

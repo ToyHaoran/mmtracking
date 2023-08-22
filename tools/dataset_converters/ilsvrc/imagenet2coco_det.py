@@ -106,6 +106,7 @@ def parse_xml(img_name, xml_path, is_vid_train_frame, records, DET,
             image_id=records['img_id'],
             category_id=category_id,
             bbox=[x1, y1, w, h],
+            segmentation=[x1, y1, x2, y1, x2, y2, x1, y2, x1, y1], # computing segmentation to add mask composing the whole bbox in image
             area=w * h,
             iscrowd=False)
         DET['annotations'].append(ann)
