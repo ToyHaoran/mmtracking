@@ -37,7 +37,7 @@ model = dict(
                 conv_out_channels=512,
                 num_classes=30,
                 loss_mask=dict(
-                    type='CrossEntropyLoss', use_mask=True, loss_weight=0.5))  # 论文中的超参数λ
+                    type='CrossEntropyLoss', use_mask=True, loss_weight=0.2))  # 论文中的超参数λ
         )))
 
 # dataset settings
