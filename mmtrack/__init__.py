@@ -8,10 +8,12 @@ from packaging.version import parse
 from .version import __version__, version_info
 
 MMCV_MIN = '2.0.0rc1'
-MMCV_MAX = '2.0.0'
+# MMCV_MAX = '2.0.0'
+MMCV_MAX = '2.1.0'  # 升级一下
 
 MMDET_MIN = '3.0.0rc0'
-MMDET_MAX = '3.0.0'
+# MMDET_MAX = '3.0.0'
+MMDET_MAX = '3.2.0'  # 升级一下
 
 
 def digit_version(version_str: str, length: int = 4):

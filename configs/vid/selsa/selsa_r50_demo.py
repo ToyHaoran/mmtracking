@@ -36,13 +36,15 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+# train_cfg = dict(type='IterBasedTrainLoop', max_iters=220000, val_interval=220000)  # by_iter
+# train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=2, val_interval=2)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
-default_hooks = dict(
-    checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=400, max_keep_ckpts=2),
-)
+# default_hooks = dict(
+#     checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=400, max_keep_ckpts=2),
+# )
 
 # optimizer
 optim_wrapper = dict(

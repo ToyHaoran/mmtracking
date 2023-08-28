@@ -44,8 +44,8 @@ test_cfg = dict(type='TestLoop')
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    optimizer=dict(type='AdamW', lr=0.00025, weight_decay=0.0001),
-    # optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
+    # optimizer=dict(type='AdamW', lr=0.00025, weight_decay=0.0001),
+    optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 
 # 学习率：2.5e-4持续3个epoch，然后2.5e-5一个，2.5e-6一个，可以达到80.4%的map。

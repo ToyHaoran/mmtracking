@@ -29,7 +29,7 @@ model = dict(
             convert_weights=True,
             init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
         neck=dict(
-            type='FPN',
+            type='FPN',  # TODO 这里可以改为ChannelMapper看看是否能加快训练速度？
             in_channels=[96, 192, 384, 768],  # Swin-T的输出维度。
             out_channels=256,
             num_outs=5),
@@ -51,7 +51,7 @@ model = dict(
             loss_bbox=dict(
                 type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)),
         roi_head=dict(
-            type='StandardRoIHead',
+            type='StandardRoIHead',  # TODO 这里改为DETE检测头怎么样？
             bbox_roi_extractor=dict(
                 type='SingleRoIExtractor',
                 roi_layer=dict(
