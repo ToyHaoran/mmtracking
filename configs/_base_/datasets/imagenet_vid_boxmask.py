@@ -1,3 +1,4 @@
+
 # dataset settings
 dataset_type = 'ImagenetVIDDataset'
 data_root = 'data/ILSVRC/'
@@ -12,7 +13,6 @@ train_pipeline = [
             dict(type='LoadTrackAnnotations', with_mask=True, poly2mask=True, with_instance_id=True),  # 这里进行了修改
             dict(type='mmdet.Resize', scale=(1000, 600), keep_ratio=True),
             dict(type='RandomFlip', prob=0.5),
-            # 使用旧的代码实现boxmask失败
         ]),
     dict(type='PackTrackInputs', meta_keys=('gt_masks'))
 ]

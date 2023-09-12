@@ -6,10 +6,13 @@ MMTracking是一款基于PyTorch的视频目标感知开源工具箱，是[OpenM
 
 支持的算法:
 
-- [x] [DFF](configs/vid/dff) (CVPR 2017)
-- [x] [FGFA](configs/vid/fgfa) (ICCV 2017)
-- [x] [SELSA](configs/vid/selsa) (ICCV 2019)
-- [x] [Temporal RoI Align](configs/vid/temporal_roi_align) (AAAI 2021)
+- [x] [DFF](configs/vid/dff/dff_faster-rcnn_r50-dc5_8xb1-7e_imagenetvid.py) (CVPR 2017)
+- [x] [FGFA](configs/vid/fgfa/fgfa_faster-rcnn_r50-dc5_8xb1-7e_imagenetvid.py) (ICCV 2017)
+- [x] [SELSA](configs/vid/selsa/selsa_faster-rcnn_r50-dc5_8xb1-7e_imagenetvid.py) (ICCV 2019)
+- [x] [Temporal RoI Align](configs/vid/temporal_roi_align/selsa-troialign_faster-rcnn_r50-dc5_8xb1-7e_imagenetvid.py) (AAAI 2021)
+- [x] [BoxMask](configs/vid/selsa/selsa_boxmask_r50.py) (WACV 2023) 
+- [x] [PTSEFormer](configs/vid/PTSEFormer) (ECCV 2022) 官方代码无法运行，做了些修改。
+- [ ] [TransVOD++] (TPAMI 2022)
 
 支持的数据集：
 

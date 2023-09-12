@@ -16,8 +16,7 @@ env_cfg = dict(
 )
 
 vis_backends = [dict(type='LocalVisBackend')]
-visualizer = dict(
-    type='TrackLocalVisualizer', vis_backends=vis_backends, name='visualizer')
+visualizer = dict(type='TrackLocalVisualizer', vis_backends=vis_backends, name='visualizer')
 
 log_level = 'INFO'
 load_from = None

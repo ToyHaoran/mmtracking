@@ -1,9 +1,7 @@
 _base_ = [
-    # dc5提取特征时输出1个(3,512,38,50)的特征图
-    # fpn提取特征时输出4个(3,512,x,x)的特征图。
     '../../_base_/models/faster-rcnn_r50_fpn.py',
-    # 这里在本机调试，修改为demo数据集，而不是使用VID和DET的混合数据集
-    '../../_base_/datasets/imagenet_vid_demo.py',
+    # '../../_base_/datasets/imagenet_vid_fgfa_style.py',   # 全数据集
+    '../../_base_/datasets/imagenet_vid_demo.py',   # demo数据集
     '../../_base_/default_runtime.py'
 ]
 
@@ -30,8 +28,7 @@ model = dict(
                 alpha=0.25,
                 loss_weight=1.0),
             loss_bbox=dict(type='IoULoss', loss_weight=1.0),
-            loss_centerness=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            loss_centerness=dict(type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
         ),
 
         roi_head=dict(
@@ -45,10 +42,13 @@ model = dict(
                     num_attention_blocks=16)),
             bbox_roi_extractor=dict(
                 type='mmtrack.SingleRoIExtractor',
-                roi_layer=dict(
-                    type='RoIAlign', output_size=7, sampling_ratio=2),
-                out_channels=512,
-                featmap_strides=[16]))))
+                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=2),
+                out_channels=256,  # 这里从512改为256
+                # featmap_strides的更新取决于于颈部的步伐 从[16]改为[8, 16, 32, 64, 128]
+                featmap_strides=[8, 16, 32, 64, 128]))))
+
+val_evaluator = dict(metric='proposal_fast')  # 这是评估的候选框。
+test_evaluator = val_evaluator
 
 # dataset settings
 val_dataloader = dict(
@@ -61,7 +61,8 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+# train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=2, val_interval=2)  # 测试用
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
@@ -78,12 +79,12 @@ optim_wrapper = dict(
 
 # learning rate
 param_scheduler = [
-    dict(
-        type='LinearLR',
-        start_factor=0.001,  # 原来1.0/3
-        by_epoch=False,
-        begin=0,
-        end=500),  # 慢慢增加 lr，否则损失变成 NAN， 从500改为1000
+    # dict(
+    #     type='LinearLR',
+    #     start_factor=0.001/4,  # 原来1.0/3
+    #     by_epoch=False,
+    #     begin=0,
+    #     end=500),  # 慢慢增加 lr，否则损失变成 NAN， 从500改为1000
     dict(
         type='MultiStepLR',
         begin=0,

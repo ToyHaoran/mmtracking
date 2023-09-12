@@ -10,6 +10,11 @@ model = dict(
     detector=dict(
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
+            bbox_roi_extractor=dict(
+                type='mmtrack.SingleRoIExtractor',
+                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=2),
+                out_channels=512,
+                featmap_strides=[16]),
             bbox_head=dict(
                 type='mmtrack.SelsaBBoxHead',
                 num_shared_fcs=2,  # TROI中这里为3
@@ -17,11 +22,6 @@ model = dict(
                     type='mmtrack.SelsaAggregator',
                     in_channels=1024,
                     num_attention_blocks=16)),
-            bbox_roi_extractor=dict(
-                type='mmtrack.SingleRoIExtractor',
-                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=2),
-                out_channels=512,
-                featmap_strides=[16]),
 
             # 以下是增加的maskhead
             mask_roi_extractor=dict(
@@ -32,12 +32,11 @@ model = dict(
                 featmap_strides=[16]),
             mask_head=dict(
                 type='FCNMaskHead',
-                num_convs=1,  # 这里只需要一个卷积就行，多了反而效果不好。
+                num_convs=1,  # 按论文中是1个卷积，但是代码是4个卷积(效果更差)
                 in_channels=512,
                 conv_out_channels=512,
                 num_classes=30,
-                loss_mask=dict(
-                    type='CrossEntropyLoss', use_mask=True, loss_weight=0.2))  # 论文中的超参数λ
+                loss_mask=dict(type='CrossEntropyLoss', use_mask=True, loss_weight=0.1))  # 超参数λ，论文中为0.5
         )))
 
 # dataset settings

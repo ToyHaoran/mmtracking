@@ -16,12 +16,13 @@ model = dict(
             num_stages=4,
             out_indices=(3, ),
             strides=(1, 2, 2, 1),
-            dilations=(1, 1, 1, 2),
+            dilations=(1, 1, 1, 2),  # 最后一层有膨胀卷积
             frozen_stages=1,
             norm_cfg=norm_cfg,
             norm_eval=True,
             style='pytorch',
-            init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
+            init_cfg=dict(
+                type='Pretrained', checkpoint='torchvision://resnet50')),
         neck=dict(
             type='ChannelMapper',
             in_channels=[2048],
@@ -33,24 +34,29 @@ model = dict(
             feat_channels=512,
             anchor_generator=dict(
                 type='AnchorGenerator',
-                scales=[4, 8, 16, 32],  # 原来是[4, 8, 16, 32]，boxmask论文代码中是[8, 16, 32, 64]
+                # 每个特征映射回原图生成的anchor个数为length(scales)*length(anchor_ratios)
+                scales=[4, 8, 16, 32],  # 这里加个2试试能不能提高小目标检测率？会增加计算量
                 ratios=[0.5, 1.0, 2.0],
                 strides=[16]),
             bbox_coder=dict(
                 type='DeltaXYWHBBoxCoder',
                 target_means=[.0, .0, .0, .0],
                 target_stds=[1.0, 1.0, 1.0, 1.0]),
-            loss_cls=dict(type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
-            loss_bbox=dict(type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)),
+            loss_cls=dict(
+                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            loss_bbox=dict(
+                type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)),
         roi_head=dict(
-            type='StandardRoIHead',  # 这里被SelsaRoIHead替代了
+            type='StandardRoIHead',
             bbox_roi_extractor=dict(
                 type='SingleRoIExtractor',
-                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=2),
+                roi_layer=dict(
+                    type='RoIAlign', output_size=7, sampling_ratio=2),
                 out_channels=512,
-                featmap_strides=[16]),
-            bbox_head=dict(
-                type='Shared2FCBBoxHead',  # 被SelsaBBoxHead代替
+                featmap_strides=[16],  # 需要映射的featmap尺度， 若为FPN的P2-P5层，则[4, 8, 16, 32]
+            ),
+            bbox_head=dict(  # 对roi操作之后的proposals进行后续的卷积、全连接、以及预测
+                type='Shared2FCBBoxHead',
                 in_channels=512,
                 fc_out_channels=1024,
                 roi_feat_size=7,
@@ -64,7 +70,14 @@ model = dict(
                     type='CrossEntropyLoss',
                     use_sigmoid=False,
                     loss_weight=1.0),
-                loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))),
+                loss_bbox=dict(
+                    type='BalancedL1Loss',  # libra中的设置
+                    alpha=0.5,
+                    gamma=1.5,
+                    beta=1.0,
+                    loss_weight=1.0),
+                # loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0),
+        )),
         # detector training and testing settings
         train_cfg=dict(
             rpn=dict(
@@ -77,15 +90,15 @@ model = dict(
                     ignore_iof_thr=-1),
                 sampler=dict(
                     type='RandomSampler',
-                    num=256,  # 关键帧的提议数量
+                    num=256,
                     pos_fraction=0.5,
-                    neg_pos_ub=-1,
+                    neg_pos_ub=5,  # libra从-1改为5
                     add_gt_as_proposals=False),
-                allowed_border=0,
+                allowed_border=-1,  # libra从0改为-1
                 pos_weight=-1,
                 debug=False),
             rpn_proposal=dict(
-                nms_pre=6000,
+                nms_pre=6000,  # 对每一层在nms之前都取scores分值最高得前6000个
                 max_per_img=600,  # 参考帧的提议数量
                 nms=dict(type='nms', iou_threshold=0.7),
                 min_bbox_size=0),
@@ -93,17 +106,27 @@ model = dict(
                 assigner=dict(
                     type='MaxIoUAssigner',
                     iou_calculator=dict(type='BboxOverlaps2D'),
-                    pos_iou_thr=0.5,
-                    neg_iou_thr=0.5,
-                    min_pos_iou=0.5,
+                    pos_iou_thr=0.5,  # 对2000个proposals的每一个，都找到与所有gt最大的iou，这个iou>pos_iou_thrde的为正例
+                    neg_iou_thr=0.5,  # 对2000个proposals的每一个，都找到与所有gt最大的iou，这个0<iou<neg_iou_thr的为正例
+                    min_pos_iou=0.5,  # 假设有10个gt，对每一个gt都从2000个proposals中找到与之iou最大的，并且iou>min_pos_iou的为正例
                     ignore_iof_thr=-1),
                 sampler=dict(
-                    type='RandomSampler',
-                    num=256,
+                    type='CombinedSampler',  # libra论文中的采样
+                    num=512,
                     pos_fraction=0.25,
-                    neg_pos_ub=-1,
-                    add_gt_as_proposals=True),
-                mask_size=28,  # 为了boxmask修改了一部分，论文中mask分支生成的大小。
+                    add_gt_as_proposals=True,
+                    pos_sampler=dict(type='InstanceBalancedPosSampler'),
+                    neg_sampler=dict(
+                        type='IoUBalancedNegSampler',
+                        floor_thr=-1,
+                        floor_fraction=0,
+                        num_bins=3)),
+                # sampler=dict(
+                #     type='RandomSampler',
+                #     num=256,  # 从assigner之后proposals中，随机选取256个
+                #     pos_fraction=0.25,  # 正例的比例占0.25，其余为负例，正例不足用负例补齐
+                #     neg_pos_ub=-1,
+                #     add_gt_as_proposals=True),  # 将gt添加到当前的proposals中
                 pos_weight=-1,
                 debug=False)),
         test_cfg=dict(
@@ -115,8 +138,7 @@ model = dict(
             rcnn=dict(
                 score_thr=0.0001,
                 nms=dict(type='nms', iou_threshold=0.5),
-                max_per_img=100,
-                mask_thr_binary=0.5))  # 相比SELSA增加的部分
+                max_per_img=100))
         # soft-nms is also supported for rcnn testing
         # e.g., nms=dict(type='soft_nms', iou_threshold=0.5, min_score=0.05)
     ))

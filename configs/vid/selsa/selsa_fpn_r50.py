@@ -1,22 +1,13 @@
 _base_ = [
-    '../../_base_/models/faster-rcnn_swin_backbone.py',  # 更换了backbone
-    # '../../_base_/datasets/imagenet_vid_demo.py',  # demo数据集测试
-    '../../_base_/datasets/imagenet_vid_fgfa_style.py',  # 混合数据集 official
+    '../../_base_/models/faster-rcnn_r50_fpn_neck.py',  # 使用修改后的neck
+    '../../_base_/datasets/imagenet_vid_fgfa_style.py',
     '../../_base_/default_runtime.py'
 ]
-
-pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'
 model = dict(
     type='SELSA',
     detector=dict(
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
-            bbox_roi_extractor=dict(
-                type='mmtrack.SingleRoIExtractor',
-                roi_layer=dict(
-                    type='RoIAlign', output_size=7, sampling_ratio=2),
-                out_channels=256,  # 这里从512改为256
-                featmap_strides=[16]),
             bbox_head=dict(
                 type='mmtrack.SelsaBBoxHead',
                 num_shared_fcs=2,
@@ -24,7 +15,10 @@ model = dict(
                     type='mmtrack.SelsaAggregator',
                     in_channels=1024,
                     num_attention_blocks=16)),
-            )))
+            bbox_roi_extractor=dict(
+                type='mmtrack.SingleRoIExtractor',
+                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=2),
+                ))))
 
 # dataset settings
 val_dataloader = dict(
@@ -44,7 +38,7 @@ test_cfg = dict(type='TestLoop')
 # optimizer
 optim_wrapper = dict(
     type='OptimWrapper',
-    # optimizer=dict(type='AdamW', lr=0.00025, weight_decay=0.0001),
+    # optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001),
     optimizer=dict(type='SGD', lr=0.00025, momentum=0.9, weight_decay=0.0001),
     clip_grad=dict(max_norm=35, norm_type=2))
 

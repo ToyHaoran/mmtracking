@@ -2,11 +2,13 @@
 from copy import deepcopy
 from typing import List, Optional, Tuple, Union
 
+import mmcv
 import torch
 from addict import Dict
 from mmengine.structures import InstanceData
 from torch import Tensor
 
+from mmengine.visualization import Visualizer
 from mmtrack.registry import MODELS
 from mmtrack.utils import (ConfigType, OptConfigType, SampleList,
                            convert_data_sample_type)
@@ -58,33 +60,39 @@ class SELSA(BaseVideoDetector):
         """
         img = inputs['img']  # 关键帧 Tensor:(1,1,3,608,800) T=1表示1个关键帧
         assert img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
-        assert img.size(0) == 1, \
-            'SELSA video detectors only support 1 batch size per gpu for now.'
-        assert img.size(1) == 1, \
-            'SELSA video detector only has 1 key image per batch.'
+        assert img.size(0) == 1, 'SELSA video detectors only support 1 batch size per gpu for now.'
+        assert img.size(1) == 1, 'SELSA video detector only has 1 key image per batch.'
         img = img[0]
 
         ref_img = inputs['ref_img']  # 参考帧 Tensor:(1,2,3,608,800) T=2表示2个参考帧
         assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
-        assert ref_img.size(0) == 1, \
-            'SELSA video detectors only support 1 batch size per gpu for now.'
+        assert ref_img.size(0) == 1, 'SELSA video detectors only support 1 batch size per gpu for now.'
         ref_img = ref_img[0]
 
-        assert len(data_samples) == 1, \
-            'SELSA video detectors only support 1 batch size per gpu for now.'
+        assert len(data_samples) == 1, 'SELSA video detectors only support 1 batch size per gpu for now.'
 
         all_imgs = torch.cat((img, ref_img), dim=0)  # 把关键帧和参考帧 0维连接 Tensor:(3,3,608,800)、
         # 提取特征(进入mmdet)，detector是FasterRCNN，经过backbone(ResNet)，经过neck(ChannelMapper)，得到特征。
         all_x = self.detector.extract_feat(all_imgs)  # Tensor:(3,512,38,50)
+
+        if False:  # 可视化特征图
+            image = mmcv.imread(data_samples[0].get('img_path'), channel_order='rgb')  # 原始图片 HWC格式
+            featmap = all_x[4][1].squeeze(dim=0)  # 特征图 CHW格式
+            visualizer = Visualizer()
+            # drawn_img = visualizer.draw_featmap(featmap, image, channel_reduction="squeeze_mean")
+            drawn_img = visualizer.draw_featmap(featmap, image, channel_reduction="select_max")
+            # drawn_img = visualizer.draw_featmap(featmap, image, channel_reduction=None, topk=8, arrangement=(4, 2))
+            visualizer.show(drawn_img)
+
+        # 就是把关键帧和参考帧一起提取特征，最后再分开
         x = []
-        ref_x = []  # 就是把关键帧和参考帧一起提取特征，最后再分开
+        ref_x = []
         for i in range(len(all_x)):
             x.append(all_x[i][[0]])
             ref_x.append(all_x[i][1:])
 
         losses = dict()
-        ref_data_samples, _ = convert_data_sample_type(
-            data_samples[0], num_ref_imgs=len(ref_img))
+        ref_data_samples, _ = convert_data_sample_type(data_samples[0], num_ref_imgs=len(ref_img))
 
         # 提取完特征，经过RPN获得提议，为后面的SELSA聚合准备数据。
         # 如果想替换RPN网络就从这里替换。
@@ -96,8 +104,8 @@ class SELSA(BaseVideoDetector):
             for data_sample in rpn_data_samples:
                 data_sample.gt_instances.labels = torch.zeros_like(data_sample.gt_instances.labels)
             # 详见RPNHead：rpn_losses包括cls和bbox损失。proposal_list关键帧的提议框列表，bboxes、labels、scores
-            (rpn_losses,  proposal_list) = self.detector.rpn_head.loss_and_predict(
-                x, rpn_data_samples, proposal_cfg=proposal_cfg)
+            (rpn_losses,  proposal_list) = \
+                self.detector.rpn_head.loss_and_predict(x, rpn_data_samples, proposal_cfg=proposal_cfg)
             losses.update(rpn_losses)
 
             # 参考帧的提议框列表，bboxes、labels、scores
@@ -235,24 +243,19 @@ class SELSA(BaseVideoDetector):
         """
         img = inputs['img']
         assert img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
-        assert img.size(0) == 1, \
-            'SELSA video detectors only support 1 batch size per gpu for now.'
-        assert img.size(1) == 1, \
-            'SELSA video detector only has 1 key image per batch.'
+        assert img.size(0) == 1, 'SELSA video detectors only support 1 batch size per gpu for now.'
+        assert img.size(1) == 1, 'SELSA video detector only has 1 key image per batch.'
         img = img[0]
 
         if 'ref_img' in inputs:
             ref_img = inputs['ref_img']
-            assert ref_img.dim(
-            ) == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
-            assert ref_img.size(0) == 1, 'SELSA video detectors only support' \
-                                         ' 1 batch size per gpu for now.'
+            assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
+            assert ref_img.size(0) == 1, 'SELSA video detectors only support 1 batch size per gpu for now.'
             ref_img = ref_img[0]
         else:
             ref_img = None
 
-        assert len(data_samples) == 1, \
-            'SELSA video detectors only support 1 batch size per gpu for now.'
+        assert len(data_samples) == 1, 'SELSA video detectors only support 1 batch size per gpu for now.'
 
         data_sample = data_samples[0]
         img_metas = data_sample.metainfo
@@ -263,8 +266,7 @@ class SELSA(BaseVideoDetector):
         else:
             ref_img_metas = None
 
-        x, img_metas, ref_x, ref_img_metas = self.extract_feats(
-            img, img_metas, ref_img, ref_img_metas)
+        x, img_metas, ref_x, ref_img_metas = self.extract_feats(img, img_metas, ref_img, ref_img_metas)
 
         ref_data_samples = [
             deepcopy(data_sample) for _ in range(len(ref_img_metas))
@@ -274,8 +276,7 @@ class SELSA(BaseVideoDetector):
 
         if data_samples[0].get('proposals', None) is None:
             proposal_list = self.detector.rpn_head.predict(x, data_samples)
-            ref_proposals_list = self.detector.rpn_head.predict(
-                ref_x, ref_data_samples)
+            ref_proposals_list = self.detector.rpn_head.predict(ref_x, ref_data_samples)
         else:
             assert hasattr(data_samples[0], 'ref_proposals')
             proposal_list = data_samples[0].proposals

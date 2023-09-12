@@ -1,114 +1,109 @@
-# model settings
-norm_cfg = dict(type='BN', requires_grad=True)
-pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'
 model = dict(
     data_preprocessor=dict(
         type='TrackDataPreprocessor',
         mean=[123.675, 116.28, 103.53],
         std=[58.395, 57.12, 57.375],
         bgr_to_rgb=True,
-        pad_size_divisor=16),
+        rgb_to_bgr=False,
+        pad_size_divisor=16),  # 修改
     detector=dict(
         type='FasterRCNN',
         _scope_='mmdet',
         backbone=dict(
-            type='SwinTransformer',
-            embed_dims=96,
-            depths=[2, 2, 6, 2],  # Swin-T的配置
-            num_heads=[3, 6, 12, 24],
-            window_size=7,
-            mlp_ratio=4,
-            qkv_bias=True,
-            qk_scale=None,
-            drop_rate=0.,
-            attn_drop_rate=0.,
-            drop_path_rate=0.2,
-            patch_norm=True,
-            out_indices=(0, 1, 2, 3),
-            with_cp=False,
-            convert_weights=True,
-            init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
+            type='ResNet',
+            depth=50,
+            num_stages=4,
+            out_indices=(3,),
+            strides=(1, 2, 2, 1),
+            dilations=(1, 1, 1, 2),  # 最后一层有膨胀卷积
+            frozen_stages=1,
+            norm_cfg=dict(type='BN', requires_grad=True),
+            norm_eval=True,
+            style='pytorch',
+            init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
         neck=dict(
-            type='FPN',  # TODO 这里可以改为ChannelMapper看看是否能加快训练速度？
-            in_channels=[96, 192, 384, 768],  # Swin-T的输出维度。
-            out_channels=256,
-            num_outs=5),
+            type='DilatedEncoder',
+            in_channels=2048,
+            out_channels=512,
+            block_mid_channels=128,
+            num_residual_blocks=4,
+            block_dilations=[2, 4, 6, 8]),
         rpn_head=dict(
             type='RPNHead',
-            in_channels=256,
-            feat_channels=256,
+            in_channels=512,
+            feat_channels=1024,
             anchor_generator=dict(
                 type='AnchorGenerator',
-                scales=[8],  # scales和strides 都和dc5不同。
                 ratios=[0.5, 1.0, 2.0],
-                strides=[4, 8, 16, 32, 64]),
+                scales=[2, 4, 8, 16, 32],  # 改一下
+                strides=[16]),  # 这里修改一下
             bbox_coder=dict(
                 type='DeltaXYWHBBoxCoder',
                 target_means=[.0, .0, .0, .0],
                 target_stds=[1.0, 1.0, 1.0, 1.0]),
-            loss_cls=dict(
-                type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
-            loss_bbox=dict(
-                type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)),
+            loss_cls=dict(type='CrossEntropyLoss', use_sigmoid=True, loss_weight=1.0),
+            loss_bbox=dict(type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)),
         roi_head=dict(
-            type='StandardRoIHead',  # TODO 这里改为DETE检测头怎么样？
+            type='StandardRoIHead',
             bbox_roi_extractor=dict(
                 type='SingleRoIExtractor',
-                roi_layer=dict(
-                    type='RoIAlign', output_size=7, sampling_ratio=2),
-                out_channels=256,
-                featmap_strides=[16]),
+                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=0),
+                out_channels=512,  # 修改
+                featmap_strides=[16]),  # 修改 与主干保持一致。
             bbox_head=dict(
                 type='Shared2FCBBoxHead',
-                in_channels=256,
+                in_channels=512,  # 修改
                 fc_out_channels=1024,
                 roi_feat_size=7,
                 num_classes=30,
                 bbox_coder=dict(
                     type='DeltaXYWHBBoxCoder',
                     target_means=[0., 0., 0., 0.],
-                    target_stds=[0.2, 0.2, 0.2, 0.2]),
+                    target_stds=[0.1, 0.1, 0.2, 0.2]),
                 reg_class_agnostic=False,
                 loss_cls=dict(
                     type='CrossEntropyLoss',
                     use_sigmoid=False,
                     loss_weight=1.0),
-                loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))),
-        # detector training and testing settings
+                loss_bbox=dict(type='SmoothL1Loss', loss_weight=1.0))),
         train_cfg=dict(
             rpn=dict(
                 assigner=dict(
-                    type='MaxIoUAssigner',
-                    iou_calculator=dict(type='BboxOverlaps2D'),
-                    pos_iou_thr=0.7,
-                    neg_iou_thr=0.3,
-                    min_pos_iou=0.3,
-                    ignore_iof_thr=-1),
+                    type='UniformAssigner',
+                    pos_ignore_thr=0.15,
+                    neg_ignore_thr=0.7),
+                # assigner=dict(
+                #     type='MaxIoUAssigner',
+                #     pos_iou_thr=0.7,
+                #     neg_iou_thr=0.3,
+                #     min_pos_iou=0.3,
+                #     match_low_quality=True,
+                #     ignore_iof_thr=-1),
                 sampler=dict(
                     type='RandomSampler',
-                    num=256,  # 关键帧的提议数量？
+                    num=512,
                     pos_fraction=0.5,
                     neg_pos_ub=-1,
                     add_gt_as_proposals=False),
-                allowed_border=0,
+                allowed_border=-1,
                 pos_weight=-1,
                 debug=False),
             rpn_proposal=dict(
-                nms_pre=6000,
-                max_per_img=600,  # 参考帧的提议数量
+                nms_pre=2000,
+                max_per_img=1000,
                 nms=dict(type='nms', iou_threshold=0.7),
                 min_bbox_size=0),
             rcnn=dict(
                 assigner=dict(
                     type='MaxIoUAssigner',
-                    iou_calculator=dict(type='BboxOverlaps2D'),
                     pos_iou_thr=0.5,
                     neg_iou_thr=0.5,
                     min_pos_iou=0.5,
+                    match_low_quality=False,
                     ignore_iof_thr=-1),
                 sampler=dict(
                     type='RandomSampler',
-                    num=256,
+                    num=512,
                     pos_fraction=0.25,
                     neg_pos_ub=-1,
                     add_gt_as_proposals=True),
@@ -116,12 +111,12 @@ model = dict(
                 debug=False)),
         test_cfg=dict(
             rpn=dict(
-                nms_pre=6000,
-                max_per_img=300,
+                nms_pre=1000,
+                max_per_img=1000,
                 nms=dict(type='nms', iou_threshold=0.7),
                 min_bbox_size=0),
             rcnn=dict(
-                score_thr=0.0001,
+                score_thr=0.05,
                 nms=dict(type='nms', iou_threshold=0.5),
                 max_per_img=100))
         # soft-nms is also supported for rcnn testing
