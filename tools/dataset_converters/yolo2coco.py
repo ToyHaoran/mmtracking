@@ -8,9 +8,9 @@ Note:
     of your dataset is formatted in the following struction:
     .
     └── $ROOT_PATH
-        ├── classes.txt
+        ├── classes.txt  内部是80个类名
         ├── labels
-        │    ├── a.txt
+        │    ├── a.txt  (每一行是一个GT框，分别是label 中心点坐标比值 宽 高比值)
         │    ├── b.txt
         │    └── ...
         ├── images
