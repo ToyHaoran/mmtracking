@@ -1,4 +1,16 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+"""
+用来计算模型的运行速度FPS
+
+测试如下：
+python /root/pro/mmtracking/work_dirs/selsa_r50_demo/selsa_r50_demo.py
+--checkpoint /root/pro/mmtracking/work_dirs/selsa_r50_demo/epoch_2.pth
+
+输入如下：
+Overall fps: 143.3 batch/s, times per batch: 7.0 ms/batch, batch size: 1, num_workers: 2
+(GB) mem_used: 36.26 | uss: 0.25 | pss: 0.51 | total_proc: 3
+FPS=143
+"""
 import argparse
 import os
 

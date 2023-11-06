@@ -408,17 +408,17 @@ class BaseVideoDataset(BaseDataset):
         """Sampling reference frames in the same video for key frame.
 
         Args:
-            idx (int): The index of `data_info`.
-            data_info (dict): The information of key frame.
+            idx (int): The index of `data_info`. 关键帧的id
+            data_info (dict): The information of key frame. 关键帧信息
             frame_range (List(int) | int): The sampling range of reference
-                frames in the same video for key frame.
+                frames in the same video for key frame. 参考帧的采样范围
             stride (int): The sampling frame stride when sampling reference
-                images. Default: 1.
+                images. Default: 1.  采样帧步幅
             num_ref_imgs (int): The number of sampled reference images.
-                Default: 1.
+                Default: 1.  参考帧的数量
             filter_key_img (bool): If False, the key image will be in the
                 sampling reference candidates, otherwise, it is exclude.
-                Default: True.
+                Default: True. 是否过滤关键帧，默认是。
             method (str): The sampling method. Options are 'uniform',
                 'bilateral_uniform', 'test_with_adaptive_stride',
                 'test_with_fix_stride'. 'uniform' denotes reference images are
@@ -430,13 +430,19 @@ class BaseVideoDataset(BaseDataset):
                 the number of reference images). test_with_fix_stride is only
                 used in testing with sampling frame stride equalling to
                 `stride`. Default: 'uniform'.
+                uniform:表示参考图像是从关键帧的附近帧中随机采样的。
+                bilateral_uniform:表示从关键帧附近帧的两侧随机采样参考图像。
+                test_with_adaptive_stride:测试，表示采样帧步幅=视频长度/参考图像数量。
+                test_with_fix_stride:测试，采样帧步幅=“步幅”。
 
         Returns:
             list[dict]: `data_info` and the reference images information.
         """
         assert isinstance(data_info, dict)
+        # 验证帧范围的有效性，最终格式如list[-9,9]
         if isinstance(frame_range, int):
             assert frame_range >= 0, 'frame_range can not be a negative value.'
+            # 如果是一个数如9，则范围为[-9,9]
             frame_range = [-frame_range, frame_range]
         elif isinstance(frame_range, list):
             assert len(frame_range) == 2, 'The length must be 2.'
@@ -446,38 +452,41 @@ class BaseVideoDataset(BaseDataset):
         else:
             raise TypeError('The type of frame_range must be int or list.')
 
-        if 'test' in method and \
-                (frame_range[1] - frame_range[0]) != num_ref_imgs:
+        # 测试的时候，参考帧和数量和范围要匹配，否则修正。训练的时候不需要。
+        if 'test' in method and (frame_range[1] - frame_range[0]) != num_ref_imgs:
             logger = MMLogger.get_current_instance()
             logger.info(
                 'Warning:'
                 "frame_range[1] - frame_range[0] isn't equal to num_ref_imgs."
                 'Set num_ref_imgs to frame_range[1] - frame_range[0].')
-            self.ref_img_sampler[
-                'num_ref_imgs'] = frame_range[1] - frame_range[0]
+            self.ref_img_sampler['num_ref_imgs'] = frame_range[1] - frame_range[0]
 
+        # 处理一些边界情况，训练的时候全部为False，不执行。load_as_video=True，get('frame_id')>0。
         if (not self.load_as_video) or data_info.get('frame_id', -1) < 0 \
                 or (frame_range[0] == 0 and frame_range[1] == 0):
             ref_data_infos = []
             for i in range(num_ref_imgs):
                 ref_data_infos.append(data_info.copy())
+        # 真正的处理参考帧的地方
         else:
-            frame_id = data_info['frame_id']
-            left = max(0, frame_id + frame_range[0])
-            right = min(frame_id + frame_range[1],
-                        data_info['video_length'] - 1)
-            frame_ids = list(range(0, data_info['video_length']))
+            frame_id = data_info['frame_id']  # 关键帧id，如21
+            left = max(0, frame_id + frame_range[0])  # 参考帧的左边界，如21-9=12
+            right = min(frame_id + frame_range[1], data_info['video_length'] - 1)  # 参考帧的右边界，如21+9=30
+            frame_ids = list(range(0, data_info['video_length']))  # 视频的所有帧id，如0~73
 
-            ref_frame_ids = []
+            # 下面代码的主要功能：根据不同的策略，从有效的视频帧frame_ids中进行采样，作为参考帧。
+            ref_frame_ids = []  # 最终选中的参考帧id
             if method == 'uniform':
+                # 均匀采样，从关键帧的左右范围内随机选取num个参考帧
                 valid_ids = frame_ids[left:right + 1]
                 if filter_key_img and frame_id in valid_ids:
                     valid_ids.remove(frame_id)
                 num_samples = min(num_ref_imgs, len(valid_ids))
                 ref_frame_ids.extend(random.sample(valid_ids, num_samples))
+
             elif method == 'bilateral_uniform':
-                assert num_ref_imgs % 2 == 0, \
-                    'only support load even number of ref_imgs.'
+                # 左右随机采样，从关键帧的左边和右边随机选取相同数量的参考帧。
+                assert num_ref_imgs % 2 == 0, 'only support load even number of ref_imgs.'
                 for mode in ['left', 'right']:
                     if mode == 'left':
                         valid_ids = frame_ids[left:frame_id + 1]
@@ -486,25 +495,62 @@ class BaseVideoDataset(BaseDataset):
                     if filter_key_img and frame_id in valid_ids:
                         valid_ids.remove(frame_id)
                     num_samples = min(num_ref_imgs // 2, len(valid_ids))
-                    sampled_inds = random.sample(valid_ids, num_samples)
+                    sampled_inds = random.sample(valid_ids, num_samples)  # 从有效的ids中随机取num_samples个。
                     ref_frame_ids.extend(sampled_inds)
+            elif method == 'bilateral_power':
+                # 创新点：左右2^n采样，从关键帧的左右按2,4,8,16这样的间隔采样。实验结果不好。
+                assert num_ref_imgs % 2 == 0, 'only support load even number of ref_imgs.'
+                for mode in ['left', 'right']:
+                    if mode == 'left':
+                        valid_ids = frame_ids[left:frame_id + 1]  # 左侧有效id
+                    else:
+                        valid_ids = frame_ids[frame_id:right + 1]  # 右侧有效id
+                    # 过滤关键帧和当前帧
+                    if filter_key_img and frame_id in valid_ids:
+                        valid_ids.remove(frame_id)
+                    num_samples = min(num_ref_imgs // 2, len(valid_ids))
+                    for i in range(num_samples):
+                        if mode == 'left':
+                            ref_id = frame_id - (2 ** i)
+                            if ref_id < 0:
+                                break
+                        else:
+                            ref_id = frame_id + (2 ** i)
+                            if ref_id > len(frame_ids) - 1:
+                                break
+                        ref_frame_ids.append(frame_ids[ref_id])
+
             elif method == 'test_with_adaptive_stride':
+                # 测试时，自适应采样：采样帧步幅=视频长度/参考图像数量。
+                # 只有每个视频的第0帧时才会自适应采样，提取特征后作为视频所有帧的参考帧特征。见mmtrack.models.vid.selsa.SELSA.extract_feats()
                 if frame_id == 0:
-                    stride = float(len(frame_ids) - 1) / (num_ref_imgs - 1)
-                    for i in range(num_ref_imgs):
+                    stride = float(len(frame_ids) - 1) / (num_ref_imgs - 1)  # 计算在整个视频中均匀采样使用的步幅。
+                    for i in range(num_ref_imgs):  # 获得均匀采样后的参考帧id。
                         ref_id = round(i * stride)
                         ref_frame_ids.append(frame_ids[ref_id])
-            elif method == 'test_with_fix_stride':
+
+            elif method == 'test_with_adaptive_stride_and_random':
+                # 创新点：测试时，自适应采样+随机采样：采样帧步幅=视频长度/参考图像数量。
+                # 如果步幅越大，采样越多，类似于按一定间隔采样
                 if frame_id == 0:
+                    stride = float(len(frame_ids) - 1) / (num_ref_imgs - 1)  # 计算在整个视频中均匀采样使用的步幅。
+                    for i in range(num_ref_imgs):  # 获得均匀采样后的参考帧id。
+                        ref_id = round(i * stride)
+                        ref_frame_ids.append(frame_ids[ref_id])
+                    sampled_inds = random.sample(frame_ids, 10)  # 从有效的ids中随机取n个
+                    ref_frame_ids.extend(sampled_inds)
+                    ref_frame_ids = list(set(ref_frame_ids))  # 去重
+
+            elif method == 'test_with_fix_stride':
+                # 测试，采样帧步幅=“步幅”。见SELSA.extract_feats()
+                if frame_id == 0:  # 对于第0帧
                     for i in range(frame_range[0], 1):
-                        ref_frame_ids.append(frame_ids[0])
-                    for i in range(1, frame_range[1] + 1):
+                        ref_frame_ids.append(frame_ids[0])  # id=0
+                    for i in range(1, frame_range[1] + 1):  # 意思是每隔一个步幅采样一次，采样n个帧，或到视频结束。
                         ref_id = min(round(i * stride), len(frame_ids) - 1)
                         ref_frame_ids.append(frame_ids[ref_id])
-                elif frame_id % stride == 0:
-                    ref_id = min(
-                        round(frame_id + frame_range[1] * stride),
-                        len(frame_ids) - 1)
+                elif frame_id % stride == 0:  # 如果是采样帧，和上面的一样，感觉多此一举。
+                    ref_id = min(round(frame_id + frame_range[1] * stride), len(frame_ids) - 1)
                     ref_frame_ids.append(frame_ids[ref_id])
                 data_info['num_left_ref_imgs'] = abs(frame_range[0])
                 data_info['frame_stride'] = stride
@@ -514,8 +560,7 @@ class BaseVideoDataset(BaseDataset):
             ref_data_infos = []
             for ref_frame_id in ref_frame_ids:
                 offset = ref_frame_id - frame_id
-                ref_data_info = self._get_ori_data_info(
-                    self.valid_data_indices[idx] + offset)
+                ref_data_info = self._get_ori_data_info(self.valid_data_indices[idx] + offset)
 
                 # We need data_info and ref_data_info to have the same keys.
                 for key in data_info.keys():
@@ -524,6 +569,5 @@ class BaseVideoDataset(BaseDataset):
 
                 ref_data_infos.append(ref_data_info)
 
-            ref_data_infos = sorted(
-                ref_data_infos, key=lambda i: i['frame_id'])
+            ref_data_infos = sorted(ref_data_infos, key=lambda i: i['frame_id'])
         return [data_info, *ref_data_infos]

@@ -21,8 +21,7 @@ model = dict(
             norm_cfg=norm_cfg,
             norm_eval=True,
             style='pytorch',
-            init_cfg=dict(
-                type='Pretrained', checkpoint='torchvision://resnet50')),
+            init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
         neck=dict(
             type='ChannelMapper',
             in_channels=[2048],
@@ -35,8 +34,8 @@ model = dict(
             anchor_generator=dict(
                 type='AnchorGenerator',
                 # 每个特征映射回原图生成的anchor个数为length(scales)*length(anchor_ratios)
-                scales=[2, 4, 8, 16, 32],  # 这里加个2试试能不能提高小目标检测率？会增加一些计算量
-                ratios=[0.5, 1.0, 2.0],
+                scales=[4, 8, 16, 32],  # 将anchor，这里加个2会导致大目标精度下降，小目标提升很小。
+                ratios=[0.5, 1.0, 2.0],  # 原来 0.5, 1.0, 2.0
                 strides=[16]),
             bbox_coder=dict(
                 type='DeltaXYWHBBoxCoder',
@@ -50,8 +49,7 @@ model = dict(
             type='StandardRoIHead',
             bbox_roi_extractor=dict(
                 type='SingleRoIExtractor',
-                roi_layer=dict(
-                    type='RoIAlign', output_size=7, sampling_ratio=2),
+                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=2),
                 out_channels=512,
                 featmap_strides=[16],  # 需要映射的featmap尺度， 若为FPN的P2-P5层，则[4, 8, 16, 32]
             ),
@@ -83,7 +81,7 @@ model = dict(
                     ignore_iof_thr=-1),
                 sampler=dict(
                     type='RandomSampler',
-                    num=256,
+                    num=256,  # 关键帧的提议数量
                     pos_fraction=0.5,
                     neg_pos_ub=-1,
                     add_gt_as_proposals=False),

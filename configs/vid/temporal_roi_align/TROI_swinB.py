@@ -6,20 +6,20 @@ _base_ = [
     '../../_base_/default_runtime.py'
 ]
 
-# pretrained = 'https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'
 model = dict(
     type='SELSA',
     detector=dict(
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
             bbox_roi_extractor=dict(
-                type='mmtrack.SingleRoIExtractor',
-                roi_layer=dict(
-                    type='RoIAlign', output_size=7, sampling_ratio=2),
+                type='mmtrack.TemporalRoIAlign',
+                num_most_similar_points=2,
+                num_temporal_attention_blocks=4,
+                roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=2),
                 ),
             bbox_head=dict(
                 type='mmtrack.SelsaBBoxHead',
-                num_shared_fcs=2,
+                num_shared_fcs=3,
                 aggregator=dict(
                     type='mmtrack.SelsaAggregator',
                     in_channels=1024,
@@ -37,7 +37,7 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=7, val_interval=7)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
@@ -58,9 +58,9 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=8,
+        end=5,
         by_epoch=True,
-        milestones=[4, 6],
+        milestones=[3, 4],
         gamma=0.1)
 ]
 

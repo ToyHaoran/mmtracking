@@ -1,6 +1,6 @@
 _base_ = [
-    # '../../_base_/models/faster-rcnn_r50-dc5.py',  # dc5提取特征时输出1个(3,512,38,50)的特征图
-    '../../_base_/models/faster-rcnn_r50_fpn.py',  # fpn提取特征时输出4个(3,512,x,x)的特征图。
+    '../../_base_/models/faster-rcnn_r50-dc5.py',  # dc5提取特征时输出1个(3,512,38,50)的特征图
+    # '../../_base_/models/faster-rcnn_r50_fpn.py',  # fpn提取特征时输出4个(3,512,x,x)的特征图。
     # '../../_base_/models/faster-rcnn_r50_fpn_neck.py',
     # '../../_base_/models/faster-rcnn_r50_YOLOF_neck.py',
     # '../../_base_/models/faster-rcnn_r50-dc5_sampler.py',
@@ -10,6 +10,10 @@ _base_ = [
 ]
 model = dict(
     type='SELSA',
+    test_cfg=dict(
+        # 逻辑已经改变，必须在这里说明采样方法，否则默认方法是test_with_adaptive_stride
+        ref_samper_method='test_with_adaptive_stride_and_random',
+        ),
     detector=dict(
         roi_head=dict(
             type='mmtrack.SelsaRoIHead',
@@ -31,17 +35,23 @@ val_dataloader = dict(
     dataset=dict(
         ref_img_sampler=dict(
             _delete_=True,
-            num_ref_imgs=14,
-            frame_range=[-7, 7],
-            method='test_with_adaptive_stride',
-            # method='test_with_adaptive_stride_and_random',
+            num_ref_imgs=20,
+            frame_range=[-10, 10],
+            # method='test_with_adaptive_stride',
+            method='test_with_adaptive_stride_and_random',
         )))
 test_dataloader = val_dataloader
 
 # training schedule
+# train_cfg = dict(type='IterBasedTrainLoop', max_iters=220000, val_interval=220000)  # by_iter
+# train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
 train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=2, val_interval=2)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
+
+# default_hooks = dict(
+#     checkpoint=dict(type='CheckpointHook', by_epoch=False, interval=400, max_keep_ckpts=2),
+# )
 
 # optimizer
 optim_wrapper = dict(
@@ -62,7 +72,7 @@ param_scheduler = [
         begin=0,
         end=5,
         by_epoch=True,
-        milestones=[3, 4],
+        milestones=[1],
         gamma=0.1)
 ]
 

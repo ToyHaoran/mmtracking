@@ -94,8 +94,10 @@ class SELSA(BaseVideoDetector):
         losses = dict()
         ref_data_samples, _ = convert_data_sample_type(data_samples[0], num_ref_imgs=len(ref_img))
 
+        # 进行帧级别的特征聚合
+
+
         # 提取完特征，经过RPN获得提议，为后面的SELSA聚合准备数据。
-        # 如果想替换RPN网络就从这里替换。
         # RPN forward and loss
         if self.detector.with_rpn:
             proposal_cfg = self.detector.train_cfg.get('rpn_proposal', self.detector.test_cfg.rpn)
@@ -162,32 +164,28 @@ class SELSA(BaseVideoDetector):
         num_left_ref_imgs = img_metas.get('num_left_ref_imgs', -1)
         frame_stride = img_metas.get('frame_stride', -1)
 
-        # test with adaptive stride
-        if frame_stride < 1:
-            if frame_id == 0:
-                self.memo = Dict()
-                self.memo.img_metas = ref_img_metas
-                ref_x = self.detector.extract_feat(ref_img)
-                # 'tuple' object (e.g. the output of FPN) does not support
-                # item assignment
-                self.memo.feats = []
-                for i in range(len(ref_x)):
-                    self.memo.feats.append(ref_x[i])
-
-            x = self.detector.extract_feat(img)
-            ref_x = self.memo.feats.copy()
-            for i in range(len(x)):
-                ref_x[i] = torch.cat((ref_x[i], x[i]), dim=0)
-            ref_img_metas = self.memo.img_metas.copy()
-            ref_img_metas.append(img_metas)
-        # test with fixed stride
+        # 默认方法为自适应采样
+        if self.test_cfg is not None:
+            method = self.test_cfg.get('ref_samper_method', 'test_with_adaptive_stride')  # 获取采样方法
         else:
+            method = 'test_with_adaptive_stride'
+
+        # 原来判断采样方法如下：
+        # if frame_stride < 1: 为test with adaptive stride
+        # else:  为test with fixed stride
+
+        if method == 'bilateral_power':
+            # 处理参考帧。如果不保存重复帧的话会导致大量重复计算，但是保存的话会占用大量的内存，只能作为一种参考，不如自适应采样。
+            ref_x = self.detector.extract_feat(ref_img)
+            # 处理关键帧：
+            x = self.detector.extract_feat(img)
+
+        elif method == 'test_with_fix_stride':
             if frame_id == 0:
                 self.memo = Dict()
                 self.memo.img_metas = ref_img_metas[0]
                 ref_x = self.detector.extract_feat(ref_img)
-                # 'tuple' object (e.g. the output of FPN) does not support
-                # item assignment
+                # 'tuple' object (e.g. the output of FPN) does not support item assignment
                 self.memo.feats = []
                 # the features of img is same as ref_x[i][[num_left_ref_imgs]]
                 x = []
@@ -213,6 +211,24 @@ class SELSA(BaseVideoDetector):
                 ref_x[i][num_left_ref_imgs] = x[i]
             ref_img_metas = self.memo.img_metas.copy()
             ref_img_metas[num_left_ref_imgs] = img_metas
+
+        else:  # 默认方法，自适应采样
+            # 只有每个视频的第0帧才提取参考帧的特征，并作为所有视频的参考帧。
+            if frame_id == 0:
+                self.memo = Dict()
+                self.memo.img_metas = ref_img_metas
+                ref_x = self.detector.extract_feat(ref_img)  # 提取参考帧特征，每个视频提取一次。
+                # 'tuple' object (e.g. the output of FPN) does not support item assignment
+                self.memo.feats = []
+                for i in range(len(ref_x)):
+                    self.memo.feats.append(ref_x[i])
+            # 视频的其他帧的处理方式：直接复制第0帧的参考帧特征，避免重复提取特征。
+            x = self.detector.extract_feat(img)  # 提取关键帧的特征
+            ref_x = self.memo.feats.copy()
+            for i in range(len(x)):
+                ref_x[i] = torch.cat((ref_x[i], x[i]), dim=0)
+            ref_img_metas = self.memo.img_metas.copy()
+            ref_img_metas.append(img_metas)
 
         return x, img_metas, ref_x, ref_img_metas
 
@@ -247,6 +263,7 @@ class SELSA(BaseVideoDetector):
         assert img.size(1) == 1, 'SELSA video detector only has 1 key image per batch.'
         img = img[0]
 
+        # 注意只有每个视频的第0帧才有参考帧，其他关键帧没有参考帧。
         if 'ref_img' in inputs:
             ref_img = inputs['ref_img']
             assert ref_img.dim() == 5, 'The img must be 5D Tensor (N, T, C, H, W).'
@@ -261,16 +278,13 @@ class SELSA(BaseVideoDetector):
         img_metas = data_sample.metainfo
 
         if ref_img is not None:
-            _, ref_img_metas = convert_data_sample_type(
-                data_sample, num_ref_imgs=len(ref_img))
+            _, ref_img_metas = convert_data_sample_type(data_sample, num_ref_imgs=len(ref_img))
         else:
             ref_img_metas = None
 
         x, img_metas, ref_x, ref_img_metas = self.extract_feats(img, img_metas, ref_img, ref_img_metas)
 
-        ref_data_samples = [
-            deepcopy(data_sample) for _ in range(len(ref_img_metas))
-        ]
+        ref_data_samples = [deepcopy(data_sample) for _ in range(len(ref_img_metas))]
         for i in range(len(ref_img_metas)):
             ref_data_samples[i].set_metainfo(ref_img_metas[i])
 

@@ -97,7 +97,7 @@ class TrackDataPreprocessor(BaseDataPreprocessor):
 
         Args:
             data (dict): data sampled from dataloader.
-                inputs: img是一个训练帧，ref_img是两个参考帧。
+                inputs: img是一个训练帧，ref_img是n个参考帧。
             training (bool): Whether to enable training time augmentation.
 
         Returns:

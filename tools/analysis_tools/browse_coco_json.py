@@ -1,3 +1,25 @@
+"""
+本文件用来粗略查看coco格式的目标框和图片是否匹配。
+需要先运行voc2coco.py或yolo2coco.py文件生成xxx.json文件。
+
+生成的数据文件夹结构：
+-data
+    -coco
+        -annotations
+            -val.json
+        -val
+            -a.png
+            -b.png
+            -...
+
+注意修改注解和图片路径。 tools/analysis_tools/browse_coco_json.py:137
+'--img-dir', default='data/coco/val', help='image folder path')
+'--ann-file', default='data/coco/annotations/val.json
+
+然后在命令行运行，不要pycharm直接运行。
+python tools/analysis_tools/browse_coco_json.py
+"""
+
 import argparse
 import os.path as osp
 

@@ -96,13 +96,11 @@ class SelsaRoIHead(StandardRoIHead):
 
         # TODO: a more flexible way to decide which feature maps to use
         # SELSA和TROI就这个提取过程不同但是输出格式是一样的。
-        # 即根据框坐标提取对应的特征，输出7*7*512大小的特征图，tensor(256,512,7,7), 256表示提议的数量。
+        # 即根据框坐标提取对应的特征，输出7*7*512大小的特征图，tensor(256,512,7,7), 256表示关键帧提议的数量。
         bbox_feats = self.bbox_roi_extractor(x[:self.bbox_roi_extractor.num_inputs], rois,
                                              ref_feats=ref_x[:self.bbox_roi_extractor.num_inputs])
         # tensor(600,512,7,7)，600表示所有参考帧的提议总数。
         ref_bbox_feats = self.bbox_roi_extractor(ref_x[:self.bbox_roi_extractor.num_inputs], ref_rois)
-
-        # TODO 按论文中的说法，boxmask应该从这里插入，生成一些预测。然后与loss连接在一起。
 
         if self.with_shared_head:
             bbox_feats = self.shared_head(bbox_feats)

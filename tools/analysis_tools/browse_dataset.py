@@ -1,4 +1,10 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+"""
+浏览数据集，和browse_coco_json.py类似
+
+待测试：
+
+"""
 import argparse
 import os.path as osp
 

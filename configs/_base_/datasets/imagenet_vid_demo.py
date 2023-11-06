@@ -32,7 +32,7 @@ train_dataloader = dict(
     batch_size=1,
     num_workers=2,
     persistent_workers=True,
-    sampler=dict(type='DefaultSampler', shuffle=True),
+    sampler=dict(type='DefaultSampler', shuffle=True),  # 数据集采样，打乱数据集
     batch_sampler=dict(type='mmdet.AspectRatioBatchSampler'),
     dataset=dict(
         type=dataset_type,
@@ -71,6 +71,7 @@ test_dataloader = val_dataloader
 # evaluator
 val_evaluator = dict(
     type='CocoVideoMetric',
+    classwise=True,
     ann_file=data_root + 'annotations/imagenet_vid_val.json',
     metric='bbox')
 test_evaluator = val_evaluator

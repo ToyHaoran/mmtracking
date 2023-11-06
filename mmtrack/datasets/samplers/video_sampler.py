@@ -47,14 +47,15 @@ class VideoSampler(Sampler):
                     ])
                 self.indices.append(indices_chunk)
         else:
+            # 这里进行VID的视频采样，供多个GPU进行并行处理
             assert isinstance(self.dataset, BaseVideoDataset)
-            first_frame_indices = []
+            first_frame_indices = []  # 数据集共有17万张图片，这里是每个视频的第一帧的id
             for i in range(len(self.dataset)):
                 data_info = self.dataset.get_data_info(i)
                 if data_info['frame_id'] == 0:
                     first_frame_indices.append(i)
 
-            self.num_videos = len(first_frame_indices)
+            self.num_videos = len(first_frame_indices)  # 视频的总数=555
             if self.num_videos < self.world_size:
                 raise ValueError(f'only {self.num_videos} videos loaded,'
                                  f'but {self.world_size} gpus were given.')

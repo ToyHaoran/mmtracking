@@ -1,4 +1,11 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+"""
+分析log日志，并生成loss曲线
+
+测试如下：
+
+
+"""
 import argparse
 import json
 from collections import defaultdict
