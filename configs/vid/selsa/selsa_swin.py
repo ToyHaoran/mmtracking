@@ -37,7 +37,7 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=7, val_interval=7)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 
@@ -58,9 +58,9 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=8,
+        end=7,
         by_epoch=True,
-        milestones=[4, 6],
+        milestones=[3, 4],
         gamma=0.1)
 ]
 

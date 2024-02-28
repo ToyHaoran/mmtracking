@@ -1,6 +1,6 @@
 _base_ = [
-    # '../../_base_/models/faster-rcnn_r50-dc5.py',  # dc5提取特征时输出1个(3,512,38,50)的特征图
-    '../../_base_/models/faster-rcnn_r50_fpn.py',  # fpn提取特征时输出4个(3,512,x,x)的特征图。
+    '../../_base_/models/faster-rcnn_r50-dc5.py',  # dc5提取特征时输出1个(3,512,38,50)的特征图
+    # '../../_base_/models/faster-rcnn_r50_fpn.py',  # fpn提取特征时输出4个(3,512,x,x)的特征图。
     # '../../_base_/models/faster-rcnn_r50_fpn_neck.py',
     # '../../_base_/models/faster-rcnn_r50_YOLOF_neck.py',
     # '../../_base_/models/faster-rcnn_r50-dc5_sampler.py',
@@ -39,7 +39,7 @@ val_dataloader = dict(
 test_dataloader = val_dataloader
 
 # training schedule
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=2, val_interval=2)
+train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=5, val_interval=5)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 

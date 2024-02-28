@@ -1,6 +1,7 @@
 _base_ = [
     # Linux调试使用混合数据集，本机调试使用demo数据集。
-    '../../_base_/datasets/imagenet_vid_fgfa_style.py',
+    '../../_base_/datasets/imagenet_vid_demo.py',  # demo数据集，很小，便于调试。
+    # '../../_base_/datasets/imagenet_vid_fgfa_style.py',
     '../../_base_/default_runtime.py'
 ]
 

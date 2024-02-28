@@ -6,7 +6,9 @@ import mmcv
 import torch
 from addict import Dict
 from mmengine.structures import InstanceData
-from torch import Tensor
+from torch import Tensor, nn
+
+import torch.nn.functional as F
 
 from mmengine.visualization import Visualizer
 from mmtrack.registry import MODELS
@@ -37,6 +39,13 @@ class SELSA(BaseVideoDetector):
             'selsa video detector only supports two stage detector'
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
+
+        # 暂时放这，之后训练好了再弄到配置文件中
+        self.flag_of_whether_aggregator_frame_feature = True
+        # 把detector中的outchannel拿出来。
+        self.conv_2ref_frame = nn.Conv2d(in_channels=512*2, out_channels=512, kernel_size=3, padding=1)
+        self.conv_7ref_frame = nn.Conv2d(in_channels=512*7, out_channels=512, kernel_size=3, padding=1)
+        self.conv_14ref_frame = nn.Conv2d(in_channels=512*14, out_channels=512, kernel_size=3, padding=1)
 
         if frozen_modules is not None:
             self.freeze_module(frozen_modules)
@@ -84,18 +93,19 @@ class SELSA(BaseVideoDetector):
             # drawn_img = visualizer.draw_featmap(featmap, image, channel_reduction=None, topk=8, arrangement=(4, 2))
             visualizer.show(drawn_img)
 
-        # 就是把关键帧和参考帧一起提取特征，最后再分开
-        x = []
-        ref_x = []
-        for i in range(len(all_x)):
-            x.append(all_x[i][[0]])
-            ref_x.append(all_x[i][1:])
+        # 是否进行帧级别的特征聚合，提取细粒度特征
+        if self.flag_of_whether_aggregator_frame_feature:
+            x, ref_x = self.frame_aggregator(all_x)
+        else:
+            # 就是把关键帧和参考帧一起提取特征，最后再分开
+            x = []
+            ref_x = []
+            for i in range(len(all_x)):
+                x.append(all_x[i][[0]])
+                ref_x.append(all_x[i][1:])
 
         losses = dict()
         ref_data_samples, _ = convert_data_sample_type(data_samples[0], num_ref_imgs=len(ref_img))
-
-        # 进行帧级别的特征聚合
-
 
         # 提取完特征，经过RPN获得提议，为后面的SELSA聚合准备数据。
         # RPN forward and loss
@@ -106,7 +116,7 @@ class SELSA(BaseVideoDetector):
             for data_sample in rpn_data_samples:
                 data_sample.gt_instances.labels = torch.zeros_like(data_sample.gt_instances.labels)
             # 详见RPNHead：rpn_losses包括cls和bbox损失。proposal_list关键帧的提议框列表，bboxes、labels、scores
-            (rpn_losses,  proposal_list) = \
+            (rpn_losses, proposal_list) = \
                 self.detector.rpn_head.loss_and_predict(x, rpn_data_samples, proposal_cfg=proposal_cfg)
             losses.update(rpn_losses)
 
@@ -123,10 +133,30 @@ class SELSA(BaseVideoDetector):
 
         # 内部调用关系复杂，可在aggregator处打断点理解调用关系
         roi_losses = self.detector.roi_head.loss(x, ref_x, proposal_list, ref_proposals_list, data_samples, **kwargs)
-
         losses.update(roi_losses)
 
         return losses
+
+    # 帧级别的特征聚合
+    def frame_aggregator(self, all_x):
+        x = []
+        ref_x = []
+        for i in range(len(all_x)):  # i表示level
+            # 1 将参考帧特征在通道维度聚合，然后维度压缩
+            ref_level = all_x[i][1:]  # 参考帧
+            shape = ref_level.shape  # (2, 512, h, w)
+            ref_x.append(ref_level)
+            if shape[0] == 1:  # 可能只有一个参考帧
+                ref_level = ref_level
+            elif shape[0] == 2:
+                ref_level = ref_level.view(1, -1, shape[2], shape[3])  # 通道维度连接
+                ref_level = self.conv_2ref_frame(ref_level)
+
+            # 2 然后直接与关键帧相加，或者多头自注意力。
+            x_level = all_x[i][[0]]
+            x_level = x_level + ref_level
+            x.append(x_level)  # 关键帧
+        return x, ref_x
 
     def extract_feats(self, img: Tensor, img_metas: dict,
                       ref_img: Optional[Tensor],
@@ -220,10 +250,31 @@ class SELSA(BaseVideoDetector):
                 ref_x = self.detector.extract_feat(ref_img)  # 提取参考帧特征，每个视频提取一次。
                 # 'tuple' object (e.g. the output of FPN) does not support item assignment
                 self.memo.feats = []
+                self.memo.ref_all = []
                 for i in range(len(ref_x)):
                     self.memo.feats.append(ref_x[i])
+                    if self.flag_of_whether_aggregator_frame_feature:  # 是否进行帧聚合
+                        # 1 将参考帧特征在通道维度聚合，然后维度压缩
+                        ref_level = ref_x[i]  # 参考帧
+                        shape = ref_level.shape  # (14, 512, h, w)
+                        if shape[0] == 1:  # 可能只有一个参考帧
+                            ref_level = ref_level
+                            self.memo.ref_all.append(ref_level)
+                        elif shape[0] == 2:
+                            ref_level = ref_level.view(1, -1, shape[2], shape[3])  # 通道维度连接
+                            ref_level = self.conv_2ref_frame(ref_level)
+                            self.memo.ref_all.append(ref_level)
+                        elif shape[0] == 14:
+                            ref_level = ref_level.view(1, -1, shape[2], shape[3])  # 通道维度连接
+                            ref_level = self.conv_14ref_frame(ref_level)
+                            self.memo.ref_all.append(ref_level)
             # 视频的其他帧的处理方式：直接复制第0帧的参考帧特征，避免重复提取特征。
             x = self.detector.extract_feat(img)  # 提取关键帧的特征
+            if self.flag_of_whether_aggregator_frame_feature:
+                y = []
+                for i in range(len(x)):
+                    y.append(x[i] + self.memo.ref_all[i])
+                x = tuple(y)
             ref_x = self.memo.feats.copy()
             for i in range(len(x)):
                 ref_x[i] = torch.cat((ref_x[i], x[i]), dim=0)
