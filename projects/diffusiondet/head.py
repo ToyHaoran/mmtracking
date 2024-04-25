@@ -573,7 +573,7 @@ class DynamicDiffusionDetHead(nn.Module):
                     ensemble_coord.append(box_pred_per_image)
                 continue
 
-            # 获取\alpha_i的连乘值
+            # 获取\alpha_i的连乘值  DDIM
             alpha = self.alphas_cumprod[time]
             alpha_next = self.alphas_cumprod[time_next]
 
